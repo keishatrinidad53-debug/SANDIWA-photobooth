@@ -4,6 +4,10 @@ import { getDatabase } from "firebase/database";
 const firebaseConfig = {
   apiKey: "AIzaSyA_2ZdTthwVbQI1SHd_YXg17K3nrZoEUNU",
   authDomain: "sandiwa-photobooth.firebaseapp.com",
+
+  databaseURL:
+    "https://sandiwa-photobooth-default-rtdb.asia-southeast1.firebasedatabase.app",
+
   projectId: "sandiwa-photobooth",
   storageBucket: "sandiwa-photobooth.firebasestorage.app",
   messagingSenderId: "393476825962",
