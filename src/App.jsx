@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
+import { ref, update } from "firebase/database";
+import { database } from "./firebase";
+
+import {
+  sendPhoto,
+  sendCameraReady,
+  listenToSession,
+  clearRemotePhoto,
+} from "./remoteCamera";
+
 import { generateQR } from "./utils/qrCode";
 import { uploadPhoto } from "./utils/uploadPhoto";
 
@@ -10,35 +20,115 @@ const STRIP_HEIGHT = 1800;
 const PRINT_WIDTH = 1200;
 const PRINT_HEIGHT = 1800;
 
+const SESSION_ID = "sandiwa-booth";
+
 function App() {
+  // =====================================================
+  // DEVICE MODE
+  // =====================================================
+
+  const [deviceMode, setDeviceMode] = useState("controller");
+
+  // =====================================================
+  // REFS
+  // =====================================================
+
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
 
+  const lastCommandRef = useRef(null);
+  const remotePhotoIdRef = useRef(null);
+
+  // =====================================================
+  // SCREEN
+  // =====================================================
+
   const [screen, setScreen] = useState("home");
 
+  // =====================================================
+  // PHOTO SESSION
+  // =====================================================
+
   const [captureMode, setCaptureMode] = useState(4);
+
   const [photos, setPhotos] = useState([]);
-  const [selectedPhotos, setSelectedPhotos] = useState([]);
+
+  const [selectedPhotos, setSelectedPhotos] =
+    useState([]);
+
+  // =====================================================
+  // CAMERA / COUNTDOWN
+  // =====================================================
 
   const [countdown, setCountdown] = useState(null);
-  const [isCounting, setIsCounting] = useState(false);
-  const [cameraReady, setCameraReady] = useState(false);
 
-  const [cameras, setCameras] = useState([]);
-  const [selectedCamera, setSelectedCamera] = useState("");
+  const [isCounting, setIsCounting] =
+    useState(false);
 
-  const [template, setTemplate] = useState(null);
+  const [cameraReady, setCameraReady] =
+    useState(false);
 
-  const [finalStrip, setFinalStrip] = useState(null);
-const [finalPrint, setFinalPrint] = useState(null);
+  const [
+    waitingForRemotePhoto,
+    setWaitingForRemotePhoto,
+  ] = useState(false);
 
-const [qrCode, setQrCode] = useState(null);
-const [isUploading, setIsUploading] = useState(false);
+  // =====================================================
+  // TEMPLATE
+  // =====================================================
 
-const [gallery, setGallery] = useState([]);
+  const [template, setTemplate] =
+    useState(null);
 
-  const [templateSlots, setTemplateSlots] = useState([]);
+  const [templateSlots, setTemplateSlots] =
+    useState([]);
+
+  // =====================================================
+  // FINAL IMAGES
+  // =====================================================
+
+  const [finalStrip, setFinalStrip] =
+    useState(null);
+
+  const [finalPrint, setFinalPrint] =
+    useState(null);
+
+  // =====================================================
+  // QR / UPLOAD
+  // =====================================================
+
+  const [qrCode, setQrCode] =
+    useState(null);
+
+  const [isUploading, setIsUploading] =
+    useState(false);
+
+  // =====================================================
+  // GALLERY
+  // =====================================================
+
+  const [gallery, setGallery] =
+    useState([]);
+
+  // =====================================================
+  // DETECT DEVICE MODE
+  // =====================================================
+
+  useEffect(() => {
+    const params =
+      new URLSearchParams(
+        window.location.search
+      );
+
+    if (
+      params.get("camera") === "1"
+    ) {
+      setDeviceMode("camera");
+    } else {
+      setDeviceMode("controller");
+    }
+  }, []);
 
   // =====================================================
   // LOAD GALLERY
@@ -46,9 +136,12 @@ const [gallery, setGallery] = useState([]);
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(
-        localStorage.getItem("sandiwa-gallery") || "[]"
-      );
+      const saved =
+        JSON.parse(
+          localStorage.getItem(
+            "sandiwa-gallery"
+          ) || "[]"
+        );
 
       setGallery(saved);
     } catch {
@@ -65,10 +158,14 @@ const [gallery, setGallery] = useState([]);
       const item = {
         id: Date.now(),
         image,
-        date: new Date().toLocaleString(),
+        date:
+          new Date().toLocaleString(),
       };
 
-      const updated = [item, ...gallery].slice(0, 30);
+      const updated = [
+        item,
+        ...gallery,
+      ].slice(0, 30);
 
       setGallery(updated);
 
@@ -77,109 +174,348 @@ const [gallery, setGallery] = useState([]);
         JSON.stringify(updated)
       );
     } catch (error) {
-      console.error(error);
+      console.error(
+        "Gallery save error:",
+        error
+      );
     }
   }
 
   // =====================================================
-  // FIND CAMERAS
+  // START IPAD / IPHONE CAMERA
   // =====================================================
 
-  async function findCameras() {
-    try {
-      const permission =
-        await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
+  useEffect(() => {
+    if (
+      deviceMode !== "camera"
+    ) {
+      return;
+    }
 
-      permission.getTracks().forEach((track) => {
-        track.stop();
-      });
+    let active = true;
 
-      const devices =
-        await navigator.mediaDevices.enumerateDevices();
+    async function startRemoteCamera() {
+      try {
+        const stream =
+          await navigator.mediaDevices.getUserMedia(
+            {
+              video: {
+                facingMode: "user",
+                width: {
+                  ideal: 1920,
+                },
+                height: {
+                  ideal: 1080,
+                },
+              },
+              audio: false,
+            }
+          );
 
-      const videoDevices = devices.filter(
-        (device) => device.kind === "videoinput"
-      );
+        if (!active) {
+          stream
+            .getTracks()
+            .forEach((track) =>
+              track.stop()
+            );
 
-      setCameras(videoDevices);
+          return;
+        }
 
-      if (
-        videoDevices.length > 0 &&
-        !selectedCamera
-      ) {
-        setSelectedCamera(
-          videoDevices[0].deviceId
+        streamRef.current =
+          stream;
+
+        if (videoRef.current) {
+          videoRef.current.srcObject =
+            stream;
+
+          await videoRef.current.play();
+        }
+
+        setCameraReady(true);
+
+        await sendCameraReady();
+
+        console.log(
+          "Remote camera ready"
+        );
+      } catch (error) {
+        console.error(
+          "Remote camera error:",
+          error
+        );
+
+        setCameraReady(false);
+
+        alert(
+          "Camera permission was not granted. Please allow camera access and reload the page."
         );
       }
-    } catch (error) {
-      console.error(error);
-
-      alert(
-        "Camera permission was not granted."
-      );
     }
-  }
 
-  // =====================================================
-  // START CAMERA
-  // =====================================================
+    startRemoteCamera();
 
-  async function startCamera() {
-    try {
+    return () => {
+      active = false;
+
       if (streamRef.current) {
         streamRef.current
           .getTracks()
-          .forEach((track) => track.stop());
+          .forEach((track) =>
+            track.stop()
+          );
+
+        streamRef.current =
+          null;
       }
-
-      const constraints = {
-        video: selectedCamera
-          ? {
-              deviceId: {
-                exact: selectedCamera,
-              },
-              width: {
-                ideal: 1920,
-              },
-              height: {
-                ideal: 1080,
-              },
-            }
-          : {
-              width: {
-                ideal: 1920,
-              },
-              height: {
-                ideal: 1080,
-              },
-            },
-        audio: false,
-      };
-
-      const stream =
-        await navigator.mediaDevices.getUserMedia(
-          constraints
-        );
-
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-
-        await videoRef.current.play();
-      }
-
-      setCameraReady(true);
-    } catch (error) {
-      console.error(error);
 
       setCameraReady(false);
+    };
+  }, [deviceMode]);
+
+  // =====================================================
+  // IPAD LISTENS FOR CAPTURE COMMAND
+  // =====================================================
+
+  useEffect(() => {
+    if (
+      deviceMode !== "camera"
+    ) {
+      return;
+    }
+
+    const unsubscribe =
+      listenToSession(
+        async (data) => {
+          if (
+            !data ||
+            !data.command
+          ) {
+            return;
+          }
+
+          if (
+            data.command !==
+            "capture"
+          ) {
+            return;
+          }
+
+          if (
+            data.commandId ===
+            lastCommandRef.current
+          ) {
+            return;
+          }
+
+          lastCommandRef.current =
+            data.commandId;
+
+          console.log(
+            "Capture command received:",
+            data.commandId
+          );
+
+          await captureRemotePhoto();
+        }
+      );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [deviceMode]);
+
+  // =====================================================
+  // IPAD CAPTURE PHOTO
+  // =====================================================
+
+  async function captureRemotePhoto() {
+    const video =
+      videoRef.current;
+
+    if (!video) {
+      console.log(
+        "Video element unavailable"
+      );
+
+      return;
+    }
+
+    if (
+      video.readyState < 2 ||
+      video.videoWidth === 0
+    ) {
+      console.log(
+        "Camera is not ready"
+      );
+
+      return;
+    }
+
+    try {
+      const canvas =
+        document.createElement(
+          "canvas"
+        );
+
+      canvas.width =
+        video.videoWidth;
+
+      canvas.height =
+        video.videoHeight;
+
+      const ctx =
+        canvas.getContext(
+          "2d"
+        );
+
+      if (!ctx) {
+        return;
+      }
+
+      // Mirror front camera
+      ctx.translate(
+        canvas.width,
+        0
+      );
+
+      ctx.scale(-1, 1);
+
+      ctx.drawImage(
+        video,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+
+      const photo =
+        canvas.toDataURL(
+          "image/jpeg",
+          0.95
+        );
+
+      console.log(
+        "Sending photo to laptop..."
+      );
+
+      await sendPhoto(photo);
+
+      console.log(
+        "Photo sent successfully"
+      );
+    } catch (error) {
+      console.error(
+        "Remote photo error:",
+        error
+      );
+    }
+  }
+
+  // =====================================================
+  // LAPTOP LISTENS FOR IPAD PHOTO
+  // =====================================================
+
+  useEffect(() => {
+    if (
+      deviceMode !==
+      "controller"
+    ) {
+      return;
+    }
+
+    const unsubscribe =
+      listenToSession(
+        (data) => {
+          if (!data) {
+            return;
+          }
+
+          // Camera status
+          if (
+            data.cameraStatus ===
+            "ready"
+          ) {
+            setCameraReady(true);
+          }
+
+          // Photo received
+          if (
+            data.status ===
+              "photo-ready" &&
+            data.photo &&
+            data.photoId !==
+              remotePhotoIdRef.current
+          ) {
+            remotePhotoIdRef.current =
+              data.photoId;
+
+            console.log(
+              "Photo received from iPad"
+            );
+
+            setPhotos(
+              (previous) => [
+                ...previous,
+                data.photo,
+              ]
+            );
+
+            setWaitingForRemotePhoto(
+              false
+            );
+
+            clearRemotePhoto();
+          }
+        }
+      );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [deviceMode]);
+
+  // =====================================================
+  // REQUEST PHOTO FROM IPAD
+  // =====================================================
+
+  async function requestRemotePhoto() {
+    try {
+      setWaitingForRemotePhoto(
+        true
+      );
+
+      const commandId =
+        Date.now();
+
+      await update(
+        ref(
+          database,
+          `photobooth/${SESSION_ID}`
+        ),
+        {
+          command: "capture",
+          commandId,
+          status: "waiting",
+        }
+      );
+
+      console.log(
+        "Capture command sent:",
+        commandId
+      );
+    } catch (error) {
+      console.error(
+        "Failed to request photo:",
+        error
+      );
+
+      setWaitingForRemotePhoto(
+        false
+      );
 
       alert(
-        "Unable to start the camera."
+        "Could not communicate with the iPad camera. Make sure the iPad is connected."
       );
     }
   }
@@ -192,28 +528,43 @@ const [gallery, setGallery] = useState([]);
     if (streamRef.current) {
       streamRef.current
         .getTracks()
-        .forEach((track) => track.stop());
+        .forEach((track) =>
+          track.stop()
+        );
 
-      streamRef.current = null;
+      streamRef.current =
+        null;
     }
 
     setCameraReady(false);
   }
 
   // =====================================================
-  // START MODE
+  // CHOOSE CAPTURE MODE
   // =====================================================
 
-  function chooseCaptureMode(mode) {
+  function chooseCaptureMode(
+    mode
+  ) {
     setCaptureMode(mode);
+
     setPhotos([]);
+
     setSelectedPhotos([]);
+
     setFinalStrip(null);
+
     setFinalPrint(null);
 
-    findCameras();
+    setCountdown(null);
 
-    setScreen("camera-select");
+    setIsCounting(false);
+
+    setWaitingForRemotePhoto(
+      false
+    );
+
+    setScreen("camera");
   }
 
   // =====================================================
@@ -221,65 +572,19 @@ const [gallery, setGallery] = useState([]);
   // =====================================================
 
   function beginSession() {
-    if (!selectedCamera) {
-      alert("Please select a camera first.");
-      return;
-    }
-
     setPhotos([]);
+
     setSelectedPhotos([]);
+
     setCountdown(null);
+
     setIsCounting(false);
 
+    setWaitingForRemotePhoto(
+      false
+    );
+
     setScreen("camera");
-
-    setTimeout(() => {
-      startCamera();
-    }, 300);
-  }
-
-  // =====================================================
-  // CAPTURE PHOTO
-  // =====================================================
-
-  function capturePhoto() {
-    const video = videoRef.current;
-
-    if (!video) return null;
-
-    if (
-      video.readyState < 2 ||
-      video.videoWidth === 0
-    ) {
-      return null;
-    }
-
-    const canvas =
-      document.createElement("canvas");
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    const ctx = canvas.getContext("2d");
-
-    if (!ctx) return null;
-
-    // Mirror image
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-
-    ctx.drawImage(
-      video,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
-
-    return canvas.toDataURL(
-      "image/jpeg",
-      0.95
-    );
   }
 
   // =====================================================
@@ -290,7 +595,9 @@ const [gallery, setGallery] = useState([]);
     if (
       isCounting ||
       !cameraReady ||
-      photos.length >= captureMode
+      waitingForRemotePhoto ||
+      photos.length >=
+        captureMode
     ) {
       return;
     }
@@ -301,32 +608,38 @@ const [gallery, setGallery] = useState([]);
 
     setCountdown(seconds);
 
-    timerRef.current = setInterval(() => {
-      seconds--;
+    timerRef.current =
+      setInterval(() => {
+        seconds--;
 
-      if (seconds > 0) {
-        setCountdown(seconds);
-        return;
-      }
+        if (seconds > 0) {
+          setCountdown(
+            seconds
+          );
 
-      clearInterval(timerRef.current);
-
-      setCountdown("📸");
-
-      setTimeout(() => {
-        const photo = capturePhoto();
-
-        if (photo) {
-          setPhotos((previous) => [
-            ...previous,
-            photo,
-          ]);
+          return;
         }
 
-        setCountdown(null);
-        setIsCounting(false);
-      }, 600);
-    }, 1000);
+        clearInterval(
+          timerRef.current
+        );
+
+        timerRef.current =
+          null;
+
+        setCountdown("📸");
+
+        setTimeout(
+          async () => {
+            await requestRemotePhoto();
+
+            setCountdown(null);
+
+            setIsCounting(false);
+          },
+          600
+        );
+      }, 1000);
   }
 
   // =====================================================
@@ -335,25 +648,42 @@ const [gallery, setGallery] = useState([]);
 
   useEffect(() => {
     if (
-      screen !== "camera" ||
-      !cameraReady ||
-      isCounting
+      deviceMode !==
+      "controller"
     ) {
       return;
     }
 
-    if (photos.length >= captureMode) {
-      stopCamera();
+    if (
+      screen !== "camera" ||
+      !cameraReady ||
+      isCounting ||
+      waitingForRemotePhoto
+    ) {
+      return;
+    }
 
-      if (captureMode === 4) {
+    if (
+      photos.length >=
+      captureMode
+    ) {
+      if (
+        captureMode === 4
+      ) {
         setSelectedPhotos(
-          photos.map((_, index) => index)
+          photos.map(
+            (_, index) =>
+              index
+          )
         );
 
         setScreen("select");
       } else {
         setSelectedPhotos(
-          photos.map((_, index) => index)
+          photos.map(
+            (_, index) =>
+              index
+          )
         );
 
         setScreen("template");
@@ -362,15 +692,19 @@ const [gallery, setGallery] = useState([]);
       return;
     }
 
-    const delay = setTimeout(() => {
-      startCountdown();
-    }, 1200);
+    const delay =
+      setTimeout(() => {
+        startCountdown();
+      }, 1200);
 
-    return () => clearTimeout(delay);
+    return () =>
+      clearTimeout(delay);
   }, [
+    deviceMode,
     screen,
     cameraReady,
     isCounting,
+    waitingForRemotePhoto,
     photos,
     captureMode,
   ]);
@@ -379,68 +713,118 @@ const [gallery, setGallery] = useState([]);
   // PHOTO SELECTION
   // =====================================================
 
-  function togglePhoto(index) {
-    setSelectedPhotos((previous) => {
-      if (previous.includes(index)) {
-        return previous.filter(
-          (item) => item !== index
-        );
-      }
+  function togglePhoto(
+    index
+  ) {
+    setSelectedPhotos(
+      (previous) => {
+        if (
+          previous.includes(
+            index
+          )
+        ) {
+          return previous.filter(
+            (item) =>
+              item !== index
+          );
+        }
 
-      if (previous.length >= 4) {
-        return previous;
-      }
+        if (
+          previous.length >= 4
+        ) {
+          return previous;
+        }
 
-      return [...previous, index];
-    });
+        return [
+          ...previous,
+          index,
+        ];
+      }
+    );
   }
 
   // =====================================================
   // UPLOAD TEMPLATE
   // =====================================================
 
-  function uploadTemplate(event) {
-    const file = event.target.files?.[0];
+  function uploadTemplate(
+    event
+  ) {
+    const file =
+      event.target.files?.[0];
 
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      alert("Please upload a JPG or PNG.");
+    if (!file) {
       return;
     }
 
-    const reader = new FileReader();
+    if (
+      !file.type.startsWith(
+        "image/"
+      )
+    ) {
+      alert(
+        "Please upload a JPG or PNG."
+      );
+
+      return;
+    }
+
+    const reader =
+      new FileReader();
 
     reader.onload = () => {
-      setTemplate(reader.result);
+      setTemplate(
+        reader.result
+      );
 
-      // Detect slots after loading
-      detectTemplateSlots(reader.result);
+      detectTemplateSlots(
+        reader.result
+      );
     };
 
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(
+      file
+    );
   }
 
   // =====================================================
-  // DETECT GREEN PHOTO BOXES
+  // DETECT TEMPLATE SLOTS
   // =====================================================
 
-  async function detectTemplateSlots(imageSrc) {
-    const image = new Image();
+  async function detectTemplateSlots(
+    imageSrc
+  ) {
+    const image =
+      new Image();
 
     image.src = imageSrc;
 
-    await new Promise((resolve) => {
-      image.onload = resolve;
-    });
+    await new Promise(
+      (resolve) => {
+        image.onload =
+          resolve;
+      }
+    );
 
     const canvas =
-      document.createElement("canvas");
+      document.createElement(
+        "canvas"
+      );
 
-    canvas.width = image.width;
-    canvas.height = image.height;
+    canvas.width =
+      image.width;
 
-    const ctx = canvas.getContext("2d");
+    canvas.height =
+      image.height;
+
+    const ctx =
+      canvas.getContext(
+        "2d"
+      );
+
+    if (!ctx) {
+      return;
+    }
 
     ctx.drawImage(
       image,
@@ -450,25 +834,26 @@ const [gallery, setGallery] = useState([]);
       image.height
     );
 
-    const data = ctx.getImageData(
-      0,
-      0,
-      image.width,
-      image.height
-    ).data;
+    const data =
+      ctx.getImageData(
+        0,
+        0,
+        image.width,
+        image.height
+      ).data;
 
-    const width = image.width;
-    const height = image.height;
+    const width =
+      image.width;
 
-    const mask = new Uint8Array(
-      width * height
-    );
+    const height =
+      image.height;
 
-    // Detect the green placeholder.
-    //
-    // Your uploaded template uses approximately:
-    // RGB(0,191,99)
+    const mask =
+      new Uint8Array(
+        width * height
+      );
 
+    // Detect green placeholder
     for (
       let y = 0;
       y < height;
@@ -480,11 +865,17 @@ const [gallery, setGallery] = useState([]);
         x++
       ) {
         const i =
-          (y * width + x) * 4;
+          (y * width + x) *
+          4;
 
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
+        const r =
+          data[i];
+
+        const g =
+          data[i + 1];
+
+        const b =
+          data[i + 2];
 
         if (
           g > 120 &&
@@ -498,7 +889,7 @@ const [gallery, setGallery] = useState([]);
       }
     }
 
-    // Connected component detection
+    // Connected components
     const visited =
       new Uint8Array(
         width * height
@@ -526,42 +917,55 @@ const [gallery, setGallery] = useState([]);
           continue;
         }
 
-        const queue = [[x, y]];
+        const queue = [
+          [x, y],
+        ];
 
-        visited[index] = 1;
+        visited[index] =
+          1;
 
         let minX = x;
         let minY = y;
+
         let maxX = x;
         let maxY = y;
 
         let area = 0;
 
-        while (queue.length > 0) {
-          const [cx, cy] =
+        while (
+          queue.length > 0
+        ) {
+          const [
+            cx,
+            cy,
+          ] =
             queue.pop();
 
           area++;
 
-          minX = Math.min(
-            minX,
-            cx
-          );
+          minX =
+            Math.min(
+              minX,
+              cx
+            );
 
-          minY = Math.min(
-            minY,
-            cy
-          );
+          minY =
+            Math.min(
+              minY,
+              cy
+            );
 
-          maxX = Math.max(
-            maxX,
-            cx
-          );
+          maxX =
+            Math.max(
+              maxX,
+              cx
+            );
 
-          maxY = Math.max(
-            maxY,
-            cy
-          );
+          maxY =
+            Math.max(
+              maxY,
+              cy
+            );
 
           const neighbors = [
             [cx + 1, cy],
@@ -571,7 +975,10 @@ const [gallery, setGallery] = useState([]);
           ];
 
           for (
-            const [nx, ny] of neighbors
+            const [
+              nx,
+              ny,
+            ] of neighbors
           ) {
             if (
               nx < 0 ||
@@ -589,7 +996,8 @@ const [gallery, setGallery] = useState([]);
               mask[ni] &&
               !visited[ni]
             ) {
-              visited[ni] = 1;
+              visited[ni] =
+                1;
 
               queue.push([
                 nx,
@@ -600,12 +1008,15 @@ const [gallery, setGallery] = useState([]);
         }
 
         const boxWidth =
-          maxX - minX + 1;
+          maxX -
+          minX +
+          1;
 
         const boxHeight =
-          maxY - minY + 1;
+          maxY -
+          minY +
+          1;
 
-        // Ignore tiny green objects.
         if (
           area > 10000 &&
           boxWidth > 100 &&
@@ -622,38 +1033,56 @@ const [gallery, setGallery] = useState([]);
       }
     }
 
-    // Sort top-to-bottom then left-to-right.
-    slots.sort((a, b) => {
-      if (
-        Math.abs(a.y - b.y) < 50
-      ) {
-        return a.x - b.x;
+    slots.sort(
+      (a, b) => {
+        if (
+          Math.abs(
+            a.y - b.y
+          ) < 50
+        ) {
+          return (
+            a.x - b.x
+          );
+        }
+
+        return (
+          a.y - b.y
+        );
       }
+    );
 
-      return a.y - b.y;
-    });
+    // If template is 4R 1200x1800,
+    // use only left 600px as master strip.
+    //
+    // If template is already 600x1800,
+    // use all detected slots.
 
-    // If the uploaded image is your 4R
-    // two-copy template, use only the
-    // left half as the master strip.
-    const singleStripSlots =
-      slots
-        .filter(
+    let usableSlots;
+
+    if (
+      image.width ===
+        PRINT_WIDTH &&
+      image.height ===
+        PRINT_HEIGHT
+    ) {
+      usableSlots =
+        slots.filter(
           (slot) =>
             slot.x <
             image.width / 2
-        )
-        .map((slot) => ({
-          ...slot,
-        }));
+        );
+    } else {
+      usableSlots =
+        slots;
+    }
 
     setTemplateSlots(
-      singleStripSlots
+      usableSlots
     );
 
     console.log(
       "Detected template slots:",
-      singleStripSlots
+      usableSlots
     );
   }
 
@@ -661,19 +1090,27 @@ const [gallery, setGallery] = useState([]);
   // LOAD IMAGE
   // =====================================================
 
-  function loadImage(src) {
-    return new Promise((resolve, reject) => {
-      const image = new Image();
+  function loadImage(
+    src
+  ) {
+    return new Promise(
+      (resolve, reject) => {
+        const image =
+          new Image();
 
-      image.onload = () => resolve(image);
-      image.onerror = reject;
+        image.onload =
+          () => resolve(image);
 
-      image.src = src;
-    });
+        image.onerror =
+          reject;
+
+        image.src = src;
+      }
+    );
   }
 
   // =====================================================
-  // DRAW CROPPED PHOTO
+  // DRAW COVER IMAGE
   // =====================================================
 
   function drawCoverImage(
@@ -693,16 +1130,23 @@ const [gallery, setGallery] = useState([]);
 
     let sx = 0;
     let sy = 0;
-    let sw = image.width;
-    let sh = image.height;
 
-    if (imageRatio > boxRatio) {
+    let sw =
+      image.width;
+
+    let sh =
+      image.height;
+
+    if (
+      imageRatio > boxRatio
+    ) {
       sw =
         image.height *
         boxRatio;
 
       sx =
-        (image.width - sw) /
+        (image.width -
+          sw) /
         2;
     } else {
       sh =
@@ -710,7 +1154,8 @@ const [gallery, setGallery] = useState([]);
         boxRatio;
 
       sy =
-        (image.height - sh) /
+        (image.height -
+          sh) /
         2;
     }
 
@@ -736,23 +1181,41 @@ const [gallery, setGallery] = useState([]);
       alert(
         "Please upload your template first."
       );
+
       return;
     }
 
     if (
-      selectedPhotos.length === 0
+      selectedPhotos.length ===
+      0
     ) {
       alert(
         "Please select at least one photo."
       );
+
+      return;
+    }
+
+    if (
+      templateSlots.length <
+      selectedPhotos.length
+    ) {
+      alert(
+        `Only ${templateSlots.length} photo slots were detected. Please make sure your template has enough green photo boxes.`
+      );
+
       return;
     }
 
     const templateImage =
-      await loadImage(template);
+      await loadImage(
+        template
+      );
 
     const canvas =
-      document.createElement("canvas");
+      document.createElement(
+        "canvas"
+      );
 
     canvas.width =
       STRIP_WIDTH;
@@ -761,7 +1224,13 @@ const [gallery, setGallery] = useState([]);
       STRIP_HEIGHT;
 
     const ctx =
-      canvas.getContext("2d");
+      canvas.getContext(
+        "2d"
+      );
+
+    if (!ctx) {
+      return;
+    }
 
     // =================================================
     // DRAW TEMPLATE
@@ -773,10 +1242,9 @@ const [gallery, setGallery] = useState([]);
       templateImage.height ===
         PRINT_HEIGHT
     ) {
-      // Uploaded image is a 4R
-      // two-copy template.
-      //
-      // Take the LEFT 600x1800.
+      // 4R two-copy template
+      // Take left half
+
       ctx.drawImage(
         templateImage,
         0,
@@ -789,6 +1257,8 @@ const [gallery, setGallery] = useState([]);
         1800
       );
     } else {
+      // 2x6 template
+
       ctx.drawImage(
         templateImage,
         0,
@@ -799,29 +1269,9 @@ const [gallery, setGallery] = useState([]);
     }
 
     // =================================================
-    // DRAW PHOTOS INTO GREEN SLOTS
+    // TEMPLATE PIXELS
     // =================================================
 
-    const slots =
-      templateSlots.slice(
-        0,
-        selectedPhotos.length
-      );
-
-    if (
-      slots.length <
-      selectedPhotos.length
-    ) {
-      alert(
-        `Only ${slots.length} photo slots were detected. Please make sure your template has green photo boxes.`
-      );
-
-      return;
-    }
-
-    // We need the template pixel data
-    // so only the GREEN placeholder
-    // is replaced.
     const templateData =
       ctx.getImageData(
         0,
@@ -830,12 +1280,23 @@ const [gallery, setGallery] = useState([]);
         STRIP_HEIGHT
       );
 
+    // =================================================
+    // INSERT PHOTOS
+    // =================================================
+
+    const slots =
+      templateSlots.slice(
+        0,
+        selectedPhotos.length
+      );
+
     for (
       let i = 0;
       i < slots.length;
       i++
     ) {
-      const slot = slots[i];
+      const slot =
+        slots[i];
 
       const photo =
         await loadImage(
@@ -860,6 +1321,10 @@ const [gallery, setGallery] = useState([]);
           "2d"
         );
 
+      if (!photoCtx) {
+        continue;
+      }
+
       drawCoverImage(
         photoCtx,
         photo,
@@ -877,7 +1342,7 @@ const [gallery, setGallery] = useState([]);
           slot.height
         );
 
-      // Replace green pixels only.
+      // Replace only green pixels
       for (
         let sy = 0;
         sy < slot.height;
@@ -894,6 +1359,19 @@ const [gallery, setGallery] = useState([]);
           const templateY =
             slot.y + sy;
 
+          // Ignore anything outside
+          // the 600x1800 strip
+          if (
+            templateX < 0 ||
+            templateY < 0 ||
+            templateX >=
+              STRIP_WIDTH ||
+            templateY >=
+              STRIP_HEIGHT
+          ) {
+            continue;
+          }
+
           const sourceIndex =
             (
               templateY *
@@ -909,19 +1387,22 @@ const [gallery, setGallery] = useState([]);
             ) * 4;
 
           const r =
-            templateData.data[
-              sourceIndex
-            ];
+            templateData
+              .data[
+                sourceIndex
+              ];
 
           const g =
-            templateData.data[
-              sourceIndex + 1
-            ];
+            templateData
+              .data[
+                sourceIndex + 1
+              ];
 
           const b =
-            templateData.data[
-              sourceIndex + 2
-            ];
+            templateData
+              .data[
+                sourceIndex + 2
+              ];
 
           if (
             g > 120 &&
@@ -964,119 +1445,133 @@ const [gallery, setGallery] = useState([]);
     );
 
     // =================================================
-// UPLOAD PHOTO TO CLOUDINARY
-// =================================================
+    // CLOUDINARY + QR
+    // =================================================
 
-setIsUploading(true);
+    setIsUploading(true);
 
-try {
-  // Convert current strip to a Blob
-  const baseStrip = canvas.toDataURL(
-    "image/jpeg",
-    0.96
-  );
+    try {
+      const baseStrip =
+        canvas.toDataURL(
+          "image/jpeg",
+          0.96
+        );
 
-  const response = await fetch(baseStrip);
-  const blob = await response.blob();
+      const response =
+        await fetch(
+          baseStrip
+        );
 
-  // Upload to Cloudinary
-  const photoUrl = await uploadPhoto(blob);
+      const blob =
+        await response.blob();
 
-  console.log(
-    "Cloudinary photo URL:",
-    photoUrl
-  );
+      const photoUrl =
+        await uploadPhoto(
+          blob
+        );
 
-  // Generate QR from Cloudinary URL
-  const qr = await generateQR(photoUrl);
+      console.log(
+        "Cloudinary photo URL:",
+        photoUrl
+      );
 
-  // Load QR image
-  const qrImage =
-    await loadImage(qr);
+      const qr =
+        await generateQR(
+          photoUrl
+        );
 
-  // =================================================
-  // PUT QR ON BOTTOM-LEFT OF STRIP
-  // =================================================
+      const qrImage =
+        await loadImage(qr);
 
-  const qrSize = 105;
+      // =================================================
+      // QR POSITION
+      // =================================================
 
-  const qrMargin = 20;
+      const qrSize = 105;
 
-  // White background
-  ctx.fillStyle = "white";
+      const qrMargin = 20;
 
-  ctx.fillRect(
-    qrMargin - 5,
-    STRIP_HEIGHT -
-      qrSize -
-      qrMargin -
-      5,
-    qrSize + 10,
-    qrSize + 10
-  );
+      ctx.fillStyle =
+        "white";
 
-  // QR code
-  ctx.drawImage(
-    qrImage,
-    qrMargin,
-    STRIP_HEIGHT -
-      qrSize -
-      qrMargin,
-    qrSize,
-    qrSize
-  );
+      ctx.fillRect(
+        qrMargin - 5,
+        STRIP_HEIGHT -
+          qrSize -
+          qrMargin -
+          5,
+        qrSize + 10,
+        qrSize + 10
+      );
 
-  // =================================================
-  // FINAL STRIP WITH QR
-  // =================================================
+      ctx.drawImage(
+        qrImage,
+        qrMargin,
+        STRIP_HEIGHT -
+          qrSize -
+          qrMargin,
+        qrSize,
+        qrSize
+      );
 
-  const finalResult =
-    canvas.toDataURL(
-      "image/jpeg",
-      0.96
-    );
+      // =================================================
+      // FINAL STRIP
+      // =================================================
 
-  setFinalStrip(finalResult);
+      const finalResult =
+        canvas.toDataURL(
+          "image/jpeg",
+          0.96
+        );
 
-  setQrCode(qr);
+      setFinalStrip(
+        finalResult
+      );
 
-  saveGallery(finalResult);
+      setQrCode(qr);
 
-  // Automatically make 2 copies
-  await createTwoUpPrint(
-    finalResult
-  );
+      saveGallery(
+        finalResult
+      );
 
-} catch (error) {
-  console.error(
-    "Cloudinary / QR error:",
-    error
-  );
+      // Automatically create
+      // two copies on 4R
 
-  alert(
-    "The photo was created, but the QR code could not be generated."
-  );
+      await createTwoUpPrint(
+        finalResult
+      );
+    } catch (error) {
+      console.error(
+        "Cloudinary / QR error:",
+        error
+      );
 
-  // Keep the original strip if QR fails
-  const fallback =
-    canvas.toDataURL(
-      "image/jpeg",
-      0.96
-    );
+      alert(
+        "The photo was created, but the QR code could not be generated."
+      );
 
-  setFinalStrip(fallback);
+      const fallback =
+        canvas.toDataURL(
+          "image/jpeg",
+          0.96
+        );
 
-  saveGallery(fallback);
+      setFinalStrip(
+        fallback
+      );
 
-  await createTwoUpPrint(
-    fallback
-  );
+      saveGallery(
+        fallback
+      );
 
-} finally {
-  setIsUploading(false);
-}
+      await createTwoUpPrint(
+        fallback
+      );
+    } finally {
+      setIsUploading(false);
+    }
 
-setScreen("result");
+    setScreen("result");
   }
 
   // =====================================================
@@ -1103,10 +1598,18 @@ setScreen("result");
       PRINT_HEIGHT;
 
     const ctx =
-      canvas.getContext("2d");
+      canvas.getContext(
+        "2d"
+      );
+
+    if (!ctx) {
+      return null;
+    }
 
     // White paper
-    ctx.fillStyle = "white";
+
+    ctx.fillStyle =
+      "white";
 
     ctx.fillRect(
       0,
@@ -1116,6 +1619,7 @@ setScreen("result");
     );
 
     // LEFT COPY
+
     ctx.drawImage(
       strip,
       0,
@@ -1125,6 +1629,7 @@ setScreen("result");
     );
 
     // RIGHT COPY
+
     ctx.drawImage(
       strip,
       STRIP_WIDTH,
@@ -1139,7 +1644,9 @@ setScreen("result");
         0.96
       );
 
-    setFinalPrint(result);
+    setFinalPrint(
+      result
+    );
 
     return result;
   }
@@ -1148,11 +1655,18 @@ setScreen("result");
   // SAVE IMAGE
   // =====================================================
 
-  function saveImage(image, name) {
-    if (!image) return;
+  function saveImage(
+    image,
+    name
+  ) {
+    if (!image) {
+      return;
+    }
 
     const link =
-      document.createElement("a");
+      document.createElement(
+        "a"
+      );
 
     link.href = image;
 
@@ -1160,7 +1674,15 @@ setScreen("result");
       name ||
       `SANDIWA-${Date.now()}.jpg`;
 
+    document.body.appendChild(
+      link
+    );
+
     link.click();
+
+    document.body.removeChild(
+      link
+    );
   }
 
   // =====================================================
@@ -1263,23 +1785,44 @@ setScreen("result");
   // =====================================================
 
   function newSession() {
-  stopCamera();
+    stopCamera();
 
-  if (timerRef.current) {
-    clearInterval(timerRef.current);
+    if (timerRef.current) {
+      clearInterval(
+        timerRef.current
+      );
+
+      timerRef.current =
+        null;
+    }
+
+    setPhotos([]);
+
+    setSelectedPhotos([]);
+
+    setFinalStrip(null);
+
+    setFinalPrint(null);
+
+    setQrCode(null);
+
+    setIsUploading(false);
+
+    setCountdown(null);
+
+    setIsCounting(false);
+
+    setWaitingForRemotePhoto(
+      false
+    );
+
+    if (
+      deviceMode ===
+      "controller"
+    ) {
+      setScreen("home");
+    }
   }
-
-  setPhotos([]);
-  setSelectedPhotos([]);
-  setFinalStrip(null);
-  setFinalPrint(null);
-  setQrCode(null);
-  setIsUploading(false);
-  setCountdown(null);
-  setIsCounting(false);
-
-  setScreen("home");
-}
 
   // =====================================================
   // CLEANUP
@@ -1287,7 +1830,13 @@ setScreen("result");
 
   useEffect(() => {
     return () => {
-      stopCamera();
+      if (streamRef.current) {
+        streamRef.current
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+      }
 
       if (timerRef.current) {
         clearInterval(
@@ -1298,16 +1847,75 @@ setScreen("result");
   }, []);
 
   // =====================================================
+  // IPAD CAMERA SCREEN
+  // =====================================================
+
+  if (
+    deviceMode ===
+    "camera"
+  ) {
+    return (
+      <div className="remote-camera">
+
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="remote-camera-video"
+        />
+
+        <div className="remote-camera-overlay">
+
+          <h1>
+            SANDIWA
+          </h1>
+
+          {cameraReady ? (
+            <>
+              <div className="camera-status">
+                📱 CAMERA READY
+              </div>
+
+              <p>
+                Connected to the
+                photobooth controller.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="camera-status">
+                📷 STARTING CAMERA...
+              </div>
+
+              <p>
+                Please allow camera
+                permission.
+              </p>
+            </>
+          )}
+
+        </div>
+
+      </div>
+    );
+  }
+
+  // =====================================================
   // HOME
   // =====================================================
 
-  if (screen === "home") {
+  if (
+    screen === "home"
+  ) {
     return (
       <div className="app">
 
         <header className="brand-header">
 
-          <h1>SANDIWA</h1>
+          <h1>
+            SANDIWA
+          </h1>
 
           <p>
             Happy 107th Anniversary
@@ -1322,11 +1930,19 @@ setScreen("result");
 
             <button
               onClick={() =>
-                chooseCaptureMode(1)
+                chooseCaptureMode(
+                  1
+                )
               }
             >
-              <span>📷</span>
-              <strong>SINGLE</strong>
+              <span>
+                📷
+              </span>
+
+              <strong>
+                SINGLE
+              </strong>
+
               <small>
                 1 PHOTO
               </small>
@@ -1334,11 +1950,19 @@ setScreen("result");
 
             <button
               onClick={() =>
-                chooseCaptureMode(2)
+                chooseCaptureMode(
+                  2
+                )
               }
             >
-              <span>📷📷</span>
-              <strong>DOUBLE</strong>
+              <span>
+                📷📷
+              </span>
+
+              <strong>
+                DOUBLE
+              </strong>
+
               <small>
                 2 PHOTOS
               </small>
@@ -1346,11 +1970,19 @@ setScreen("result");
 
             <button
               onClick={() =>
-                chooseCaptureMode(3)
+                chooseCaptureMode(
+                  3
+                )
               }
             >
-              <span>📷📷📷</span>
-              <strong>TRIPLE</strong>
+              <span>
+                📷📷📷
+              </span>
+
+              <strong>
+                TRIPLE
+              </strong>
+
               <small>
                 3 PHOTOS
               </small>
@@ -1358,11 +1990,19 @@ setScreen("result");
 
             <button
               onClick={() =>
-                chooseCaptureMode(4)
+                chooseCaptureMode(
+                  4
+                )
               }
             >
-              <span>📷📷📷📷</span>
-              <strong>QUADRUPLE</strong>
+              <span>
+                📷📷📷📷
+              </span>
+
+              <strong>
+                QUADRUPLE
+              </strong>
+
               <small>
                 4 PHOTOS
               </small>
@@ -1375,7 +2015,9 @@ setScreen("result");
             <button
               className="outline-button"
               onClick={() =>
-                setScreen("template")
+                setScreen(
+                  "template"
+                )
               }
             >
               🎨 TEMPLATE
@@ -1384,12 +2026,28 @@ setScreen("result");
             <button
               className="outline-button"
               onClick={() =>
-                setScreen("gallery")
+                setScreen(
+                  "gallery"
+                )
               }
             >
               🖼️ GALLERY
             </button>
 
+          </div>
+
+          <div
+            style={{
+              marginTop: "20px",
+              textAlign: "center",
+              fontSize: "14px",
+              opacity: 0.7,
+            }}
+          >
+            Camera:
+            {cameraReady
+              ? " 🟢 CONNECTED"
+              : " 🔴 NOT CONNECTED"}
           </div>
 
         </main>
@@ -1399,113 +2057,52 @@ setScreen("result");
   }
 
   // =====================================================
-  // CAMERA SELECT
+  // CAMERA CONTROLLER SCREEN
   // =====================================================
 
   if (
-    screen ===
-    "camera-select"
+    screen === "camera"
   ) {
-    return (
-      <div className="app centered">
-
-        <div className="setup-card">
-
-          <h2>
-            Select Camera
-          </h2>
-
-          <p>
-            Choose the camera you
-            want to use.
-          </p>
-
-          <select
-            value={
-              selectedCamera
-            }
-            onChange={(e) =>
-              setSelectedCamera(
-                e.target.value
-              )
-            }
-          >
-
-            <option value="">
-              Select camera
-            </option>
-
-            {cameras.map(
-              (
-                camera,
-                index
-              ) => (
-                <option
-                  key={
-                    camera.deviceId
-                  }
-                  value={
-                    camera.deviceId
-                  }
-                >
-                  {camera.label ||
-                    `Camera ${
-                      index + 1
-                    }`}
-                </option>
-              )
-            )}
-
-          </select>
-
-          <div className="button-row">
-
-            <button
-              className="secondary"
-              onClick={
-                newSession
-              }
-            >
-              BACK
-            </button>
-
-            <button
-              className="primary"
-              disabled={
-                !selectedCamera
-              }
-              onClick={
-                beginSession
-              }
-            >
-              START
-            </button>
-
-          </div>
-
-        </div>
-
-      </div>
-    );
-  }
-
-  // =====================================================
-  // CAMERA
-  // =====================================================
-
-  if (screen === "camera") {
     return (
       <div className="camera-page">
 
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="camera-video"
-        />
+        <div
+          style={{
+            position:
+              "absolute",
+            top: "20px",
+            left: "20px",
+            right: "20px",
+            zIndex: 10,
+            display:
+              "flex",
+            justifyContent:
+              "space-between",
+            color: "white",
+            fontWeight:
+              "bold",
+            fontSize:
+              "18px",
+          }}
+        >
+          <div>
+            SANDIWA
+          </div>
 
-        <div className="camera-overlay">
+          <div>
+            {cameraReady
+              ? "📱 CAMERA CONNECTED"
+              : "🔴 WAITING FOR IPAD"}
+          </div>
+        </div>
+
+        <div
+          className="camera-overlay"
+          style={{
+            background:
+              "rgba(0,0,0,0.75)",
+          }}
+        >
 
           <div className="camera-counter">
 
@@ -1514,24 +2111,48 @@ setScreen("result");
               photos.length + 1,
               captureMode
             )}{" "}
-            / {captureMode}
+            /{" "}
+            {captureMode}
 
           </div>
 
-          {countdown !== null && (
+          {!cameraReady && (
+            <div
+              className="loading"
+              style={{
+                textAlign:
+                  "center",
+                maxWidth:
+                  "500px",
+              }}
+            >
+              <h2>
+                📱 Waiting for
+                camera...
+              </h2>
+
+              <p>
+                Open the SANDIWA
+                camera link on
+                your iPad or iPhone.
+              </p>
+            </div>
+          )}
+
+          {waitingForRemotePhoto && (
+            <div className="loading">
+              📸 Receiving photo...
+            </div>
+          )}
+
+          {countdown !==
+            null && (
             <div className="countdown">
 
               {countdown}
 
             </div>
           )}
-
-          {!cameraReady &&
-            countdown === null && (
-              <div className="loading">
-                Starting camera...
-              </div>
-            )}
 
           <div className="captured-strip">
 
@@ -1560,7 +2181,9 @@ setScreen("result");
   // PHOTO SELECTION
   // =====================================================
 
-  if (screen === "select") {
+  if (
+    screen === "select"
+  ) {
     return (
       <div className="app centered">
 
@@ -1611,7 +2234,8 @@ setScreen("result");
                       {selected
                         ? "✓ SELECTED"
                         : `PHOTO ${
-                            index + 1
+                            index +
+                            1
                           }`}
                     </span>
 
@@ -1665,7 +2289,9 @@ setScreen("result");
   // TEMPLATE
   // =====================================================
 
-  if (screen === "template") {
+  if (
+    screen === "template"
+  ) {
     return (
       <div className="app centered">
 
@@ -1746,12 +2372,18 @@ setScreen("result");
 
             <p>
               2 × 6 strip:
-              <b> 600 × 1800 px</b>
+              <b>
+                {" "}
+                600 × 1800 px
+              </b>
             </p>
 
             <p>
               4R two-copy:
-              <b> 1200 × 1800 px</b>
+              <b>
+                {" "}
+                1200 × 1800 px
+              </b>
             </p>
 
             <p>
@@ -1776,11 +2408,16 @@ setScreen("result");
                 0 && (
                 <button
                   className="primary"
+                  disabled={
+                    isUploading
+                  }
                   onClick={
                     createStrip
                   }
                 >
-                  CREATE PHOTO
+                  {isUploading
+                    ? "CREATING..."
+                    : "CREATE PHOTO"}
                 </button>
               )}
 
@@ -1796,7 +2433,9 @@ setScreen("result");
   // RESULT
   // =====================================================
 
-  if (screen === "result") {
+  if (
+    screen === "result"
+  ) {
     return (
       <div className="app centered">
 
@@ -1814,25 +2453,14 @@ setScreen("result");
 
           <div className="result-preview">
 
-  {finalStrip && (
-    <img
-      src={finalStrip}
-      alt="Final strip"
-    />
-  )}
+            {finalStrip && (
+              <img
+                src={finalStrip}
+                alt="Final strip"
+              />
+            )}
 
-</div>
-
-<div className="result-preview">
-
-  {finalStrip && (
-    <img
-      src={finalStrip}
-      alt="Final strip"
-    />
-  )}
-
-</div>
+          </div>
 
           <div className="result-buttons">
 
@@ -1890,7 +2518,9 @@ setScreen("result");
   // GALLERY
   // =====================================================
 
-  if (screen === "gallery") {
+  if (
+    screen === "gallery"
+  ) {
     return (
       <div className="app">
 
@@ -1925,12 +2555,12 @@ setScreen("result");
                     </small>
 
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         setFinalStrip(
                           item.image
                         );
 
-                        createTwoUpPrint(
+                        await createTwoUpPrint(
                           item.image
                         );
 
