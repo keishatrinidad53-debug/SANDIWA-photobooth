@@ -9,11 +9,14 @@ import { database } from "./firebase";
 
 const SESSION_ID = "sandiwa-booth";
 
+const SESSION_PATH = `photobooth/${SESSION_ID}`;
+
+// =====================================================
+// GET SESSION
+// =====================================================
+
 export function getSessionRef() {
-  return ref(
-    database,
-    `photobooth/${SESSION_ID}`
-  );
+  return ref(database, SESSION_PATH);
 }
 
 // =====================================================
@@ -21,11 +24,17 @@ export function getSessionRef() {
 // =====================================================
 
 export async function sendCaptureCommand() {
-  const commandId = Date.now();
+  const commandId =
+    `${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(2, 8)}`;
 
   await update(getSessionRef(), {
     command: "capture",
     commandId,
+    commandSentAt: Date.now(),
+
+    // Clear previous photo state
     status: "capture-requested",
   });
 
@@ -33,6 +42,8 @@ export async function sendCaptureCommand() {
     "📸 Capture command sent:",
     commandId
   );
+
+  return commandId;
 }
 
 // =====================================================
@@ -43,6 +54,9 @@ export async function sendCameraReady() {
   await update(getSessionRef(), {
     cameraStatus: "ready",
     cameraConnectedAt: Date.now(),
+
+    // Tell controller that camera is alive
+    deviceType: "phone-camera",
   });
 
   console.log(
@@ -55,19 +69,33 @@ export async function sendCameraReady() {
 // =====================================================
 
 export async function sendPhoto(photo) {
-  const photoId = Date.now();
+  if (!photo) {
+    throw new Error(
+      "No photo data was provided."
+    );
+  }
+
+  const photoId =
+    `${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(2, 8)}`;
 
   await update(getSessionRef(), {
     photo,
     photoId,
+    photoSentAt: Date.now(),
+
     status: "photo-ready",
+
     cameraStatus: "ready",
   });
 
   console.log(
-    "📷 Photo uploaded to Firebase:",
+    "📷 Photo sent to Firebase:",
     photoId
   );
+
+  return photoId;
 }
 
 // =====================================================
@@ -77,6 +105,7 @@ export async function sendPhoto(photo) {
 export async function clearRemotePhoto() {
   await update(getSessionRef(), {
     photo: null,
+    photoId: null,
     status: "idle",
   });
 
@@ -86,23 +115,39 @@ export async function clearRemotePhoto() {
 }
 
 // =====================================================
+// CLEAR CAPTURE COMMAND
+// =====================================================
+
+export async function clearCaptureCommand() {
+  await update(getSessionRef(), {
+    command: null,
+    commandId: null,
+    commandSentAt: null,
+  });
+
+  console.log(
+    "🧹 Capture command cleared"
+  );
+}
+
+// =====================================================
 // LISTEN TO SESSION
 // =====================================================
 
 export function listenToSession(callback) {
   console.log(
-    "👂 Listening to Firebase session:",
-    `photobooth/${SESSION_ID}`
+    "👂 Listening to Firebase:",
+    SESSION_PATH
   );
 
-  return onValue(
+  const unsubscribe = onValue(
     getSessionRef(),
     (snapshot) => {
       const data =
         snapshot.val() || {};
 
       console.log(
-        "🔥 Firebase session update:",
+        "🔥 Firebase session:",
         data
       );
 
@@ -115,6 +160,8 @@ export function listenToSession(callback) {
       );
     }
   );
+
+  return unsubscribe;
 }
 
 // =====================================================

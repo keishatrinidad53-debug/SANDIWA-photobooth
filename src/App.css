@@ -808,3 +808,758 @@ button {
   font-size: 14px;
   opacity: 0.7;
 }
+/* =====================================================
+   CAMERA SOURCE SELECTION
+===================================================== */
+
+.camera-source-grid {
+  display: grid;
+
+  grid-template-columns:
+    repeat(2, 1fr);
+
+  gap: 20px;
+
+  max-width: 850px;
+
+  margin: 30px auto;
+}
+
+.camera-source-card {
+  border: 1px solid #dceaf5;
+
+  background: white;
+
+  border-radius: 22px;
+
+  padding: 30px 20px;
+
+  min-height: 190px;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  justify-content: center;
+
+  gap: 12px;
+
+  color: #174b72;
+
+  box-shadow:
+    0 12px 30px
+    rgba(24, 91, 140, 0.08);
+
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+
+  cursor: pointer;
+}
+
+.camera-source-card:hover {
+  transform:
+    translateY(-5px);
+
+  border-color:
+    #1769aa;
+
+  box-shadow:
+    0 18px 35px
+    rgba(24, 91, 140, 0.16);
+}
+
+.camera-source-card:active {
+  transform:
+    translateY(-1px);
+}
+
+.camera-source-card span {
+  font-size: 48px;
+
+  line-height: 1;
+}
+
+.camera-source-card strong {
+  font-size: 18px;
+
+  letter-spacing: 0.8px;
+
+  color: #1769aa;
+}
+
+.camera-source-card small {
+  color: #8298aa;
+
+  font-size: 13px;
+
+  text-align: center;
+
+  max-width: 220px;
+}
+
+
+/* =====================================================
+   CAMERA DEVICE SELECTION
+===================================================== */
+
+.camera-empty {
+  margin: 30px auto;
+
+  padding: 35px;
+
+  max-width: 500px;
+
+  background: #f5f9fc;
+
+  border-radius: 20px;
+
+  border:
+    1px dashed #b9d1e2;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  gap: 12px;
+}
+
+.camera-empty span {
+  font-size: 55px;
+}
+
+.camera-empty strong {
+  font-size: 20px;
+
+  color: #315b78;
+}
+
+.camera-empty p {
+  margin: 0 0 15px;
+}
+
+.camera-device-info {
+  margin: 20px auto;
+
+  padding: 18px 25px;
+
+  max-width: 500px;
+
+  background: #edf7ff;
+
+  border-radius: 15px;
+
+  color: #1769aa;
+}
+
+.camera-device-info strong {
+  font-size: 18px;
+}
+
+.camera-device-info p {
+  margin:
+    7px 0 0;
+
+  font-size: 14px;
+}
+
+
+/* =====================================================
+   CAMERA SELECT DROPDOWN
+===================================================== */
+
+.setup-card select {
+  cursor: pointer;
+
+  appearance: auto;
+}
+
+.setup-card select:focus {
+  outline: none;
+
+  border-color:
+    #1769aa;
+
+  box-shadow:
+    0 0 0 3px
+    rgba(23, 105, 170, 0.12);
+}
+
+
+/* =====================================================
+   RETAKE BUTTON
+===================================================== */
+
+.retake-button {
+  width: calc(100% - 20px);
+
+  margin:
+    0 10px 12px;
+
+  border: 0;
+
+  border-radius: 10px;
+
+  padding:
+    11px 10px;
+
+  background: #edf7ff;
+
+  color: #1769aa;
+
+  font-size: 13px;
+
+  font-weight: bold;
+
+  cursor: pointer;
+
+  transition:
+    background 0.2s ease,
+    transform 0.2s ease;
+}
+
+.retake-button:hover {
+  background: #dceeff;
+
+  transform:
+    translateY(-1px);
+}
+
+.retake-button:active {
+  transform:
+    translateY(0);
+}
+
+
+/* =====================================================
+   SELECTED PHOTO
+===================================================== */
+
+.selection-photo.selected {
+  border-color:
+    #1769aa;
+
+  box-shadow:
+    0 0 0 2px
+    rgba(23, 105, 170, 0.12);
+}
+
+
+/* =====================================================
+   REMOTE PHONE / IPAD CAMERA
+===================================================== */
+
+.remote-camera {
+  position: fixed;
+
+  inset: 0;
+
+  background: black;
+
+  overflow: hidden;
+}
+
+.remote-camera-video {
+  position: absolute;
+
+  inset: 0;
+
+  width: 100%;
+
+  height: 100%;
+
+  object-fit: cover;
+
+  transform:
+    scaleX(-1);
+}
+
+.remote-camera-overlay {
+  position: absolute;
+
+  inset: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  justify-content: center;
+
+  text-align: center;
+
+  color: white;
+
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.45),
+      rgba(0, 0, 0, 0.1),
+      rgba(0, 0, 0, 0.45)
+    );
+
+  pointer-events: none;
+
+  padding: 30px;
+}
+
+.remote-camera-overlay h1 {
+  margin: 0 0 20px;
+
+  font-size: 48px;
+
+  letter-spacing: 8px;
+
+  text-shadow:
+    0 4px 20px
+    rgba(0, 0, 0, 0.7);
+}
+
+.camera-status {
+  display: inline-block;
+
+  padding:
+    12px 22px;
+
+  border-radius: 30px;
+
+  background:
+    rgba(0, 0, 0, 0.65);
+
+  font-weight: bold;
+
+  font-size: 16px;
+
+  backdrop-filter:
+    blur(8px);
+}
+
+.remote-camera-overlay p {
+  color: white;
+
+  margin-top: 15px;
+
+  font-size: 16px;
+
+  text-shadow:
+    0 2px 10px black;
+}
+
+
+/* =====================================================
+   CAMERA PAGE IMPROVEMENTS
+===================================================== */
+
+.camera-page {
+  background: #000;
+}
+
+.camera-video {
+  background: #000;
+}
+
+.camera-page .camera-counter {
+  z-index: 20;
+
+  font-size: 16px;
+
+  letter-spacing: 0.5px;
+}
+
+.camera-page .countdown {
+  z-index: 30;
+}
+
+
+/* =====================================================
+   CAPTURED PHOTO THUMBNAILS
+===================================================== */
+
+.captured-strip {
+  z-index: 40;
+
+  max-width:
+    calc(100vw - 50px);
+
+  overflow-x: auto;
+
+  padding-bottom: 5px;
+}
+
+.captured-strip img {
+  flex-shrink: 0;
+
+  width: 100px;
+
+  height: 75px;
+
+  object-fit: cover;
+
+  border:
+    3px solid white;
+
+  border-radius: 10px;
+
+  box-shadow:
+    0 5px 20px
+    rgba(0, 0, 0, 0.4);
+}
+
+
+/* =====================================================
+   MOBILE CAMERA SOURCE
+===================================================== */
+
+@media (max-width: 700px) {
+
+  .camera-source-grid {
+    grid-template-columns: 1fr;
+
+    gap: 15px;
+
+    margin-top: 20px;
+  }
+
+  .camera-source-card {
+    min-height: 150px;
+
+    padding: 25px 15px;
+  }
+
+  .camera-source-card span {
+    font-size: 40px;
+  }
+
+  .camera-source-card strong {
+    font-size: 16px;
+  }
+
+  .remote-camera-overlay h1 {
+    font-size: 38px;
+
+    letter-spacing: 5px;
+  }
+
+}
+
+
+/* =====================================================
+   SMALL PHONES
+===================================================== */
+
+@media (max-width: 450px) {
+
+  .camera-source-card {
+    min-height: 135px;
+  }
+
+  .camera-source-card span {
+    font-size: 35px;
+  }
+
+  .camera-source-card small {
+    font-size: 12px;
+  }
+
+  .retake-button {
+    font-size: 12px;
+
+    padding: 10px 6px;
+  }
+
+}
+/* =====================================================
+   CAMERA SOURCE SELECTION
+===================================================== */
+
+.camera-source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  margin: 30px 0;
+}
+
+.camera-source-card {
+  border: 1px solid #dceaf5;
+  background: white;
+  border-radius: 22px;
+  padding: 30px 20px;
+  min-height: 190px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+
+  color: #174b72;
+
+  box-shadow:
+    0 12px 30px
+    rgba(24, 91, 140, 0.1);
+
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s,
+    border-color 0.2s;
+}
+
+.camera-source-card:hover {
+  transform: translateY(-5px);
+
+  border-color: #1769aa;
+
+  box-shadow:
+    0 18px 40px
+    rgba(24, 91, 140, 0.18);
+}
+
+.camera-source-card span {
+  font-size: 45px;
+}
+
+.camera-source-card strong {
+  font-size: 17px;
+  letter-spacing: 0.5px;
+}
+
+.camera-source-card small {
+  color: #8298aa;
+  font-size: 13px;
+}
+
+
+/* =====================================================
+   CAMERA DEVICE SELECTION
+===================================================== */
+
+.camera-empty {
+  margin: 30px auto;
+  padding: 35px;
+
+  background: #f5f8fa;
+
+  border-radius: 20px;
+
+  max-width: 500px;
+}
+
+.camera-empty span {
+  display: block;
+  font-size: 55px;
+  margin-bottom: 15px;
+}
+
+.camera-empty strong {
+  display: block;
+  font-size: 20px;
+  color: #315b78;
+}
+
+.camera-empty p {
+  margin: 10px 0 20px;
+}
+
+.camera-device-info {
+  margin: 20px auto;
+  padding: 18px;
+
+  max-width: 500px;
+
+  background: #edf7ff;
+
+  border-radius: 14px;
+
+  color: #1769aa;
+}
+
+.camera-device-info strong {
+  font-size: 18px;
+}
+
+.camera-device-info p {
+  margin: 8px 0 0;
+}
+
+
+/* =====================================================
+   RETAKE BUTTON
+===================================================== */
+
+.retake-button {
+  width: calc(100% - 20px);
+
+  margin: 0 10px 12px;
+
+  border: 0;
+
+  border-radius: 10px;
+
+  padding: 11px 10px;
+
+  background: #eef5fa;
+
+  color: #1769aa;
+
+  font-weight: bold;
+
+  font-size: 13px;
+
+  transition:
+    background 0.2s,
+    transform 0.2s;
+}
+
+.retake-button:hover {
+  background: #dcecf7;
+
+  transform: translateY(-1px);
+}
+
+.selection-photo.selected
+.retake-button {
+  background: #e3f2fc;
+}
+
+
+/* =====================================================
+   REMOTE PHONE / IPAD CAMERA
+===================================================== */
+
+.remote-camera {
+  position: fixed;
+
+  inset: 0;
+
+  background: black;
+
+  overflow: hidden;
+}
+
+.remote-camera-video {
+  width: 100%;
+  height: 100%;
+
+  object-fit: cover;
+
+  transform: scaleX(-1);
+}
+
+.remote-camera-overlay {
+  position: absolute;
+
+  inset: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  justify-content: center;
+
+  text-align: center;
+
+  color: white;
+
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.5),
+      rgba(0, 0, 0, 0.1),
+      rgba(0, 0, 0, 0.5)
+    );
+
+  pointer-events: none;
+}
+
+.remote-camera-overlay h1 {
+  position: absolute;
+
+  top: 25px;
+
+  left: 50%;
+
+  transform: translateX(-50%);
+
+  margin: 0;
+
+  font-size: 32px;
+
+  letter-spacing: 6px;
+}
+
+.remote-camera-overlay p {
+  color: white;
+
+  max-width: 350px;
+
+  line-height: 1.5;
+
+  padding: 0 20px;
+}
+
+.camera-status {
+  padding: 14px 24px;
+
+  border-radius: 30px;
+
+  background:
+    rgba(0, 0, 0, 0.65);
+
+  font-size: 18px;
+
+  font-weight: bold;
+}
+
+
+/* =====================================================
+   MOBILE CAMERA SOURCE
+===================================================== */
+
+@media (max-width: 700px) {
+
+  .camera-source-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-source-card {
+    min-height: 150px;
+  }
+
+  .camera-source-card span {
+    font-size: 38px;
+  }
+
+  .remote-camera-overlay h1 {
+    font-size: 26px;
+  }
+
+}
+
+
+/* =====================================================
+   SMALL PHONE
+===================================================== */
+
+@media (max-width: 480px) {
+
+  .camera-source-card {
+    padding: 22px 15px;
+  }
+
+  .camera-source-card strong {
+    font-size: 15px;
+  }
+
+  .camera-source-card small {
+    font-size: 12px;
+  }
+
+}
