@@ -8,6 +8,10 @@ import {
   clearRemotePhoto,
   sendCaptureCommand,
   clearCaptureCommand,
+  sendControllerPreview,
+  sendControllerResult,
+  clearControllerPreview,
+  clearControllerResult,
 } from "./remoteCamera";
 
 import { generateQR } from "./utils/qrCode";
@@ -21,24 +25,28 @@ const PRINT_HEIGHT = 1800;
 
 function App() {
   // =====================================================
+  // REMOTE CAMERA DISPLAY
+  // =====================================================
+
+  const [remotePreview, setRemotePreview] = useState(null);
+  const [remotePreviewNumber, setRemotePreviewNumber] =
+    useState(null);
+
+  const [remoteResult, setRemoteResult] = useState(null);
+
+  // =====================================================
   // DEVICE MODE
   // =====================================================
 
-  const [deviceMode, setDeviceMode] =
-    useState("controller");
+  const [deviceMode, setDeviceMode] = useState("controller");
 
   // =====================================================
   // CAMERA SOURCE
   // =====================================================
 
-  const [cameraSource, setCameraSource] =
-    useState(null);
-
-  const [cameraDevices, setCameraDevices] =
-    useState([]);
-
-  const [selectedCameraId, setSelectedCameraId] =
-    useState("");
+  const [cameraSource, setCameraSource] = useState(null);
+  const [cameraDevices, setCameraDevices] = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState("");
 
   // =====================================================
   // REFS
@@ -57,38 +65,35 @@ function App() {
 
   const retakingIndexRef = useRef(null);
 
+  const cameraOperationRef = useRef(0);
+
+  // IMPORTANT:
+  // Keeps the latest photos available inside Firebase listeners.
+  const photosRef = useRef([]);
+
   // =====================================================
   // SCREEN
   // =====================================================
 
-  const [screen, setScreen] =
-    useState("home");
+  const [screen, setScreen] = useState("home");
 
   // =====================================================
   // PHOTO SESSION
   // =====================================================
 
-  const [captureMode, setCaptureMode] =
-    useState(4);
+  const [captureMode, setCaptureMode] = useState(4);
 
-  const [photos, setPhotos] =
-    useState([]);
-
-  const [selectedPhotos, setSelectedPhotos] =
-    useState([]);
+  const [photos, setPhotos] = useState([]);
+  const [selectedPhotos, setSelectedPhotos] = useState([]);
 
   // =====================================================
   // CAMERA / COUNTDOWN
   // =====================================================
 
-  const [countdown, setCountdown] =
-    useState(null);
+  const [countdown, setCountdown] = useState(null);
+  const [isCounting, setIsCounting] = useState(false);
 
-  const [isCounting, setIsCounting] =
-    useState(false);
-
-  const [cameraReady, setCameraReady] =
-    useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
 
   const [
     waitingForRemotePhoto,
@@ -99,55 +104,49 @@ function App() {
   // TEMPLATE
   // =====================================================
 
-  const [template, setTemplate] =
-    useState(null);
-
-  const [templateSlots, setTemplateSlots] =
-    useState([]);
+  const [template, setTemplate] = useState(null);
+  const [templateSlots, setTemplateSlots] = useState([]);
 
   // =====================================================
   // FINAL IMAGES
   // =====================================================
 
-  const [finalStrip, setFinalStrip] =
-    useState(null);
-
-  const [finalPrint, setFinalPrint] =
-    useState(null);
+  const [finalStrip, setFinalStrip] = useState(null);
+  const [finalPrint, setFinalPrint] = useState(null);
 
   // =====================================================
   // QR / UPLOAD
   // =====================================================
 
-  const [qrCode, setQrCode] =
-    useState(null);
-
-  const [isUploading, setIsUploading] =
-    useState(false);
+  const [qrCode, setQrCode] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   // =====================================================
   // GALLERY
   // =====================================================
 
-  const [gallery, setGallery] =
-    useState([]);
+  const [gallery, setGallery] = useState([]);
 
   // =====================================================
   // RETAKE
   // =====================================================
 
-  const [retakingIndex, setRetakingIndex] =
-    useState(null);
+  const [retakingIndex, setRetakingIndex] = useState(null);
+
+  // =====================================================
+  // KEEP PHOTOS REF SYNCHRONIZED
+  // =====================================================
+
+  useEffect(() => {
+    photosRef.current = photos;
+  }, [photos]);
 
   // =====================================================
   // DETECT DEVICE MODE
   // =====================================================
 
   useEffect(() => {
-    const params =
-      new URLSearchParams(
-        window.location.search
-      );
+    const params = new URLSearchParams(window.location.search);
 
     if (params.get("camera") === "1") {
       setDeviceMode("camera");
@@ -162,20 +161,17 @@ function App() {
 
   useEffect(() => {
     try {
-      const saved =
-        JSON.parse(
-          localStorage.getItem(
-            "sandiwa-gallery"
-          ) || "[]"
-        );
-
-      setGallery(saved);
-    } catch (error) {
-      console.error(
-        "Gallery loading error:",
-        error
+      const saved = JSON.parse(
+        localStorage.getItem("sandiwa-gallery") || "[]"
       );
 
+      if (Array.isArray(saved)) {
+        setGallery(saved);
+      } else {
+        setGallery([]);
+      }
+    } catch (error) {
+      console.error("Gallery loading error:", error);
       setGallery([]);
     }
   }, []);
@@ -185,6 +181,10 @@ function App() {
   // =====================================================
 
   function saveGallery(image) {
+    if (!image) {
+      return;
+    }
+
     try {
       const item = {
         id: Date.now(),
@@ -192,22 +192,25 @@ function App() {
         date: new Date().toLocaleString(),
       };
 
-      const updated = [
-        item,
-        ...gallery,
-      ].slice(0, 30);
+      setGallery((previous) => {
+        const updated = [item, ...previous].slice(0, 30);
 
-      setGallery(updated);
+        try {
+          localStorage.setItem(
+            "sandiwa-gallery",
+            JSON.stringify(updated)
+          );
+        } catch (storageError) {
+          console.error(
+            "Gallery localStorage error:",
+            storageError
+          );
+        }
 
-      localStorage.setItem(
-        "sandiwa-gallery",
-        JSON.stringify(updated)
-      );
+        return updated;
+      });
     } catch (error) {
-      console.error(
-        "Gallery save error:",
-        error
-      );
+      console.error("Gallery save error:", error);
     }
   }
 
@@ -216,19 +219,33 @@ function App() {
   // =====================================================
 
   function stopLocalCamera() {
+    console.log("🛑 Stopping local camera");
+
     if (localCameraStreamRef.current) {
       localCameraStreamRef.current
         .getTracks()
         .forEach((track) => {
-          track.stop();
+          try {
+            track.stop();
+          } catch (error) {
+            console.error(
+              "Error stopping local track:",
+              error
+            );
+          }
         });
 
       localCameraStreamRef.current = null;
     }
 
     if (localCameraVideoRef.current) {
-      localCameraVideoRef.current.srcObject =
-        null;
+      try {
+        localCameraVideoRef.current.pause();
+      } catch (error) {
+        console.error("Video pause error:", error);
+      }
+
+      localCameraVideoRef.current.srcObject = null;
     }
   }
 
@@ -237,17 +254,33 @@ function App() {
   // =====================================================
 
   function stopRemoteCamera() {
+    console.log("🛑 Stopping remote camera stream");
+
     if (streamRef.current) {
-      streamRef.current
-        .getTracks()
-        .forEach((track) => {
+      streamRef.current.getTracks().forEach((track) => {
+        try {
           track.stop();
-        });
+        } catch (error) {
+          console.error(
+            "Error stopping remote track:",
+            error
+          );
+        }
+      });
 
       streamRef.current = null;
     }
 
     if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+      } catch (error) {
+        console.error(
+          "Remote video pause error:",
+          error
+        );
+      }
+
       videoRef.current.srcObject = null;
     }
 
@@ -259,6 +292,8 @@ function App() {
   // =====================================================
 
   function stopAllCameras() {
+    cameraOperationRef.current += 1;
+
     stopLocalCamera();
     stopRemoteCamera();
 
@@ -266,7 +301,7 @@ function App() {
   }
 
   // =====================================================
-  // PHONE / IPAD REMOTE CAMERA
+  // IPAD / IPHONE REMOTE CAMERA
   // =====================================================
 
   useEffect(() => {
@@ -283,32 +318,32 @@ function App() {
           !navigator.mediaDevices.getUserMedia
         ) {
           throw new Error(
-            "Camera API is not supported."
+            "Camera API is not supported by this browser."
           );
         }
 
+        console.log("📱 Starting iPad/iPhone camera...");
+
         const stream =
-          await navigator.mediaDevices.getUserMedia(
-            {
-              video: {
-                facingMode: "user",
-                width: {
-                  ideal: 1920,
-                },
-                height: {
-                  ideal: 1080,
-                },
+          await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: {
+                ideal: "user",
               },
-              audio: false,
-            }
-          );
+              width: {
+                ideal: 1920,
+              },
+              height: {
+                ideal: 1080,
+              },
+            },
+            audio: false,
+          });
 
         if (!active) {
-          stream
-            .getTracks()
-            .forEach((track) => {
-              track.stop();
-            });
+          stream.getTracks().forEach((track) => {
+            track.stop();
+          });
 
           return;
         }
@@ -316,30 +351,40 @@ function App() {
         streamRef.current = stream;
 
         if (videoRef.current) {
-          videoRef.current.srcObject =
-            stream;
+          videoRef.current.srcObject = stream;
 
-          await videoRef.current.play();
+          try {
+            await videoRef.current.play();
+          } catch (error) {
+            console.error(
+              "iPad video play error:",
+              error
+            );
+          }
         }
 
         setCameraReady(true);
 
-        await sendCameraReady();
+        try {
+          await sendCameraReady();
+        } catch (error) {
+          console.error(
+            "Could not send camera ready:",
+            error
+          );
+        }
 
-        console.log(
-          "📱 Remote camera ready"
-        );
+        console.log("📱 iPad camera ready");
       } catch (error) {
-        console.error(
-          "Remote camera error:",
-          error
-        );
+        console.error("Remote camera error:", error);
 
         setCameraReady(false);
 
-        alert(
-          "Camera permission was not granted. Please allow camera access and reload the page."
-        );
+        if (active) {
+          alert(
+            "Camera permission was not granted.\n\nPlease allow camera access and reload the page."
+          );
+        }
       }
     }
 
@@ -349,13 +394,15 @@ function App() {
       active = false;
 
       if (streamRef.current) {
-        streamRef.current
-          .getTracks()
-          .forEach((track) => {
-            track.stop();
-          });
+        streamRef.current.getTracks().forEach((track) => {
+          track.stop();
+        });
 
         streamRef.current = null;
+      }
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
       }
 
       setCameraReady(false);
@@ -363,7 +410,7 @@ function App() {
   }, [deviceMode]);
 
   // =====================================================
-  // IPHONE / IPAD LISTENS FOR CAPTURE
+  // IPAD LISTENS FOR CAPTURE COMMAND
   // =====================================================
 
   useEffect(() => {
@@ -371,40 +418,37 @@ function App() {
       return;
     }
 
-    const unsubscribe =
-      listenToSession(
-        async (data) => {
-          if (!data) {
-            return;
-          }
+    const unsubscribe = listenToSession(async (data) => {
+      if (!data) {
+        return;
+      }
 
-          if (
-            data.command !== "capture"
-          ) {
-            return;
-          }
+      if (data.command !== "capture") {
+        return;
+      }
 
-          if (
-            data.commandId ===
-            lastCommandRef.current
-          ) {
-            return;
-          }
+      if (!data.commandId) {
+        return;
+      }
 
-          lastCommandRef.current =
-            data.commandId;
+      if (data.commandId === lastCommandRef.current) {
+        return;
+      }
 
-          console.log(
-            "📸 Capture command received:",
-            data.commandId
-          );
+      lastCommandRef.current = data.commandId;
 
-          await captureRemotePhoto();
-        }
+      console.log(
+        "📸 Capture command received:",
+        data.commandId
       );
 
+      await captureRemotePhoto();
+    });
+
     return () => {
-      unsubscribe();
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
     };
   }, [deviceMode]);
 
@@ -413,53 +457,39 @@ function App() {
   // =====================================================
 
   async function captureRemotePhoto() {
-    const video =
-      videoRef.current;
+    const video = videoRef.current;
 
     if (!video) {
-      console.log(
-        "Video element unavailable"
-      );
-
+      console.error("Remote camera video not found.");
       return;
     }
 
     if (
       video.readyState < 2 ||
-      video.videoWidth === 0
+      video.videoWidth === 0 ||
+      video.videoHeight === 0
     ) {
-      console.log(
-        "Remote camera is not ready"
+      console.error(
+        "iPad camera has no video frames."
       );
 
       return;
     }
 
     try {
-      const canvas =
-        document.createElement(
-          "canvas"
-        );
+      const canvas = document.createElement("canvas");
 
-      canvas.width =
-        video.videoWidth;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
 
-      canvas.height =
-        video.videoHeight;
-
-      const ctx =
-        canvas.getContext("2d");
+      const ctx = canvas.getContext("2d");
 
       if (!ctx) {
         return;
       }
 
       // Mirror front camera
-      ctx.translate(
-        canvas.width,
-        0
-      );
-
+      ctx.translate(canvas.width, 0);
       ctx.scale(-1, 1);
 
       ctx.drawImage(
@@ -470,21 +500,45 @@ function App() {
         canvas.height
       );
 
-      const photo =
-        canvas.toDataURL(
-          "image/jpeg",
-          0.95
+      const photo = canvas.toDataURL(
+        "image/jpeg",
+        0.95
+      );
+
+      setRemotePreview(photo);
+
+      try {
+        await sendPhoto(photo);
+      } catch (error) {
+        console.error(
+          "Could not send photo to laptop:",
+          error
         );
+      }
 
       console.log(
-        "📷 Sending photo to laptop..."
+        "✅ Photo captured and sent"
       );
 
-      await sendPhoto(photo);
+      // Do not immediately clear the preview if the
+      // controller is going to send its own preview.
+      setTimeout(() => {
+        setRemotePreview((current) => {
+          if (current === photo) {
+            return null;
+          }
 
-      console.log(
-        "✅ Photo sent successfully"
-      );
+          return current;
+        });
+
+        setRemotePreviewNumber((current) => {
+          if (remoteResult) {
+            return current;
+          }
+
+          return current;
+        });
+      }, 1500);
     } catch (error) {
       console.error(
         "Remote photo error:",
@@ -510,30 +564,18 @@ function App() {
         return;
       }
 
-      /*
-       * Stop whatever local camera was
-       * previously running.
-       */
       stopLocalCamera();
 
-      /*
-       * Request permission first so that
-       * Chrome/Edge exposes camera labels.
-       */
       try {
         const temporaryStream =
-          await navigator.mediaDevices.getUserMedia(
-            {
-              video: true,
-              audio: false,
-            }
-          );
-
-        temporaryStream
-          .getTracks()
-          .forEach((track) => {
-            track.stop();
+          await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
           });
+
+        temporaryStream.getTracks().forEach((track) => {
+          track.stop();
+        });
       } catch (error) {
         console.error(
           "Camera permission error:",
@@ -544,11 +586,9 @@ function App() {
       const devices =
         await navigator.mediaDevices.enumerateDevices();
 
-      const cameras =
-        devices.filter(
-          (device) =>
-            device.kind === "videoinput"
-        );
+      const cameras = devices.filter(
+        (device) => device.kind === "videoinput"
+      );
 
       setCameraDevices(cameras);
 
@@ -557,27 +597,16 @@ function App() {
         return;
       }
 
-      /*
-       * Keep the currently selected camera
-       * if it still exists.
-       */
-      const selectedStillExists =
-        cameras.some(
-          (camera) =>
-            camera.deviceId ===
-            selectedCameraId
-        );
+      const selectedStillExists = cameras.some(
+        (camera) =>
+          camera.deviceId === selectedCameraId
+      );
 
       if (!selectedStillExists) {
         setSelectedCameraId(
           cameras[0].deviceId
         );
       }
-
-      console.log(
-        "🎥 Available cameras:",
-        cameras
-      );
     } catch (error) {
       console.error(
         "Camera detection error:",
@@ -590,10 +619,16 @@ function App() {
   }
 
   // =====================================================
-  // START SELECTED LOCAL CAMERA
+  // START LOCAL CAMERA
   // =====================================================
 
   async function startLocalCamera() {
+    const operationId =
+      cameraOperationRef.current + 1;
+
+    cameraOperationRef.current =
+      operationId;
+
     try {
       if (
         !navigator.mediaDevices ||
@@ -606,27 +641,18 @@ function App() {
         return false;
       }
 
-      /*
-       * IMPORTANT:
-       * Stop previous local camera before
-       * opening another camera.
-       */
       stopLocalCamera();
 
-      /*
-       * We do NOT care about Firebase
-       * cameraStatus here.
-       *
-       * This camera is completely local.
-       */
+      cameraOperationRef.current =
+        operationId;
+
       setCameraReady(false);
 
       const constraints = {
         video: selectedCameraId
           ? {
               deviceId: {
-                exact:
-                  selectedCameraId,
+                exact: selectedCameraId,
               },
               width: {
                 ideal: 1920,
@@ -651,24 +677,61 @@ function App() {
           constraints
         );
 
+      if (
+        cameraOperationRef.current !==
+        operationId
+      ) {
+        stream.getTracks().forEach((track) => {
+          track.stop();
+        });
+
+        return false;
+      }
+
       localCameraStreamRef.current =
         stream;
 
       if (
         localCameraVideoRef.current
       ) {
-        localCameraVideoRef.current.srcObject =
-          stream;
+        const video =
+          localCameraVideoRef.current;
 
-        await localCameraVideoRef.current.play();
+        video.srcObject = stream;
+
+        try {
+          await video.play();
+        } catch (error) {
+          console.error(
+            "Local video play error:",
+            error
+          );
+        }
+      }
+
+      const hasVideoFrames =
+        await waitForLocalVideoFrames(5000);
+
+      if (
+        cameraOperationRef.current !==
+        operationId
+      ) {
+        return false;
+      }
+
+      if (!hasVideoFrames) {
+        stopLocalCamera();
+
+        setCameraReady(false);
+
+        alert(
+          "The camera opened, but no video frames were received."
+        );
+
+        return false;
       }
 
       setCameraReady(true);
-
-      console.log(
-        "🟢 Local camera ready:",
-        selectedCameraId
-      );
 
       return true;
     } catch (error) {
@@ -679,13 +742,120 @@ function App() {
 
       setCameraReady(false);
 
-      alert(
-        "Unable to start this camera. Make sure it is connected and camera permission is allowed."
-      );
+      if (
+        error?.name ===
+        "NotAllowedError"
+      ) {
+        alert(
+          "Camera permission was denied."
+        );
+      } else if (
+        error?.name ===
+        "NotReadableError"
+      ) {
+        alert(
+          "The camera is being used by another app."
+        );
+      } else if (
+        error?.name ===
+        "OverconstrainedError"
+      ) {
+        alert(
+          "This camera could not be opened using the selected settings."
+        );
+      } else {
+        alert(
+          `Unable to start this camera.\n\n${
+            error?.message ||
+            "Check camera permission."
+          }`
+        );
+      }
 
       return false;
     }
   }
+
+  // =====================================================
+  // WAIT FOR LOCAL VIDEO
+  // =====================================================
+
+  function waitForLocalVideoFrames(timeout = 5000) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+
+      function check() {
+        const video =
+          localCameraVideoRef.current;
+
+        if (
+          video &&
+          video.readyState >= 2 &&
+          video.videoWidth > 0 &&
+          video.videoHeight > 0
+        ) {
+          resolve(true);
+          return;
+        }
+
+        if (Date.now() - start >= timeout) {
+          resolve(false);
+          return;
+        }
+
+        requestAnimationFrame(check);
+      }
+
+      check();
+    });
+  }
+
+  // =====================================================
+  // ATTACH LOCAL STREAM
+  // =====================================================
+
+  useEffect(() => {
+    if (
+      deviceMode !== "controller" ||
+      screen !== "camera" ||
+      cameraSource === "remote"
+    ) {
+      return;
+    }
+
+    const video =
+      localCameraVideoRef.current;
+
+    const stream =
+      localCameraStreamRef.current;
+
+    if (!video || !stream) {
+      return;
+    }
+
+    video.srcObject = stream;
+
+    video
+      .play()
+      .catch((error) =>
+        console.error(
+          "Video play error:",
+          error
+        )
+      );
+
+    waitForLocalVideoFrames(5000).then(
+      (ready) => {
+        if (ready) {
+          setCameraReady(true);
+        }
+      }
+    );
+  }, [
+    deviceMode,
+    screen,
+    cameraSource,
+  ]);
 
   // =====================================================
   // CAPTURE LOCAL PHOTO
@@ -696,35 +866,24 @@ function App() {
       localCameraVideoRef.current;
 
     if (!video) {
-      console.log(
-        "Local video unavailable"
-      );
-
       return;
     }
 
     if (
       video.readyState < 2 ||
-      video.videoWidth === 0
+      video.videoWidth === 0 ||
+      video.videoHeight === 0
     ) {
-      console.log(
-        "Local camera is not ready"
-      );
-
+      setCameraReady(false);
       return;
     }
 
     try {
       const canvas =
-        document.createElement(
-          "canvas"
-        );
+        document.createElement("canvas");
 
-      canvas.width =
-        video.videoWidth;
-
-      canvas.height =
-        video.videoHeight;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
 
       const ctx =
         canvas.getContext("2d");
@@ -733,12 +892,8 @@ function App() {
         return;
       }
 
-      // Mirror local camera
-      ctx.translate(
-        canvas.width,
-        0
-      );
-
+      // Mirror front camera
+      ctx.translate(canvas.width, 0);
       ctx.scale(-1, 1);
 
       ctx.drawImage(
@@ -755,9 +910,9 @@ function App() {
           0.95
         );
 
-      console.log(
-        "📷 Local photo captured"
-      );
+      // =================================================
+      // RETAKE
+      // =================================================
 
       if (
         retakingIndexRef.current !==
@@ -766,18 +921,13 @@ function App() {
         const index =
           retakingIndexRef.current;
 
-        setPhotos(
-          (previous) => {
-            const updated = [
-              ...previous,
-            ];
+        setPhotos((previous) => {
+          const updated = [...previous];
 
-            updated[index] =
-              photo;
+          updated[index] = photo;
 
-            return updated;
-          }
-        );
+          return updated;
+        });
 
         retakingIndexRef.current =
           null;
@@ -808,12 +958,14 @@ function App() {
         return;
       }
 
-      setPhotos(
-        (previous) => [
-          ...previous,
-          photo,
-        ]
-      );
+      // =================================================
+      // NORMAL PHOTO
+      // =================================================
+
+      setPhotos((previous) => [
+        ...previous,
+        photo,
+      ]);
     } catch (error) {
       console.error(
         "Local photo error:",
@@ -832,127 +984,146 @@ function App() {
     }
 
     const unsubscribe =
-      listenToSession(
-        (data) => {
-          if (!data) {
-            return;
-          }
-
-          /*
-           * IMPORTANT:
-           *
-           * Firebase camera status ONLY
-           * matters when the selected source
-           * is PHONE / IPAD.
-           *
-           * It will NOT affect webcam,
-           * integrated camera, or DSLR.
-           */
-          if (
-            cameraSource === "remote"
-          ) {
-            if (
-              data.cameraStatus ===
-              "ready"
-            ) {
-              setCameraReady(true);
-            }
-          }
-
-          // =================================================
-          // REMOTE PHOTO RECEIVED
-          // =================================================
-
-          if (
-            cameraSource !==
-              "remote"
-          ) {
-            return;
-          }
-
-          if (
-            data.status ===
-              "photo-ready" &&
-            data.photo &&
-            data.photoId !==
-              remotePhotoIdRef.current
-          ) {
-            remotePhotoIdRef.current =
-              data.photoId;
-
-            console.log(
-              "📱 Photo received from iPhone/iPad"
-            );
-
-            if (
-              retakingIndexRef.current !==
-              null
-            ) {
-              const index =
-                retakingIndexRef.current;
-
-              setPhotos(
-                (previous) => {
-                  const updated = [
-                    ...previous,
-                  ];
-
-                  updated[index] =
-                    data.photo;
-
-                  return updated;
-                }
-              );
-
-              setSelectedPhotos(
-                (previous) => {
-                  if (
-                    previous.includes(
-                      index
-                    )
-                  ) {
-                    return previous;
-                  }
-
-                  return [
-                    ...previous,
-                    index,
-                  ];
-                }
-              );
-
-              retakingIndexRef.current =
-                null;
-
-              setRetakingIndex(null);
-            } else {
-              setPhotos(
-                (previous) => [
-                  ...previous,
-                  data.photo,
-                ]
-              );
-            }
-
-            setWaitingForRemotePhoto(
-              false
-            );
-
-            awaitClearRemotePhoto();
-          }
+      listenToSession(async (data) => {
+        if (!data) {
+          return;
         }
-      );
+
+        // =================================================
+        // CAMERA READY
+        // =================================================
+
+        if (
+          cameraSource === "remote" &&
+          data.cameraStatus === "ready"
+        ) {
+          setCameraReady(true);
+        }
+
+        // =================================================
+        // IGNORE PHOTO IF NOT REMOTE
+        // =================================================
+
+        if (cameraSource !== "remote") {
+          return;
+        }
+
+        // =================================================
+        // REMOTE PHOTO
+        // =================================================
+
+        if (
+          data.status === "photo-ready" &&
+          data.photo &&
+          data.photoId &&
+          data.photoId !==
+            remotePhotoIdRef.current
+        ) {
+          remotePhotoIdRef.current =
+            data.photoId;
+
+          console.log(
+            "📱 Photo received from iPad"
+          );
+
+          const currentPhotos =
+            photosRef.current;
+
+          let photoNumber =
+            currentPhotos.length + 1;
+
+          // =================================================
+          // RETAKE
+          // =================================================
+
+          if (
+            retakingIndexRef.current !==
+            null
+          ) {
+            const index =
+              retakingIndexRef.current;
+
+            photoNumber =
+              index + 1;
+
+            setPhotos((previous) => {
+              const updated = [
+                ...previous,
+              ];
+
+              updated[index] =
+                data.photo;
+
+              return updated;
+            });
+
+            setSelectedPhotos(
+              (previous) => {
+                if (
+                  previous.includes(index)
+                ) {
+                  return previous;
+                }
+
+                return [
+                  ...previous,
+                  index,
+                ];
+              }
+            );
+
+            retakingIndexRef.current =
+              null;
+
+            setRetakingIndex(null);
+          } else {
+            setPhotos((previous) => [
+              ...previous,
+              data.photo,
+            ]);
+          }
+
+          // =================================================
+          // SEND PHOTO PREVIEW TO IPAD
+          // =================================================
+
+          try {
+            setRemotePreviewNumber(
+              photoNumber
+            );
+
+            await sendControllerPreview(
+              data.photo,
+              photoNumber
+            );
+          } catch (error) {
+            console.error(
+              "Could not send preview:",
+              error
+            );
+          }
+
+          setWaitingForRemotePhoto(false);
+
+          await clearRemotePhotoSafely();
+        }
+      });
 
     return () => {
-      unsubscribe();
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
     };
-  }, [deviceMode, cameraSource]);
+  }, [
+    deviceMode,
+    cameraSource,
+  ]);
 
   // =====================================================
   // SAFE CLEAR REMOTE PHOTO
   // =====================================================
 
-  async function awaitClearRemotePhoto() {
+  async function clearRemotePhotoSafely() {
     try {
       await clearRemotePhoto();
     } catch (error) {
@@ -964,42 +1135,37 @@ function App() {
   }
 
   // =====================================================
-  // REQUEST PHOTO FROM IPHONE / IPAD
+  // REQUEST REMOTE PHOTO
   // =====================================================
 
   async function requestRemotePhoto() {
     try {
-      if (
-        cameraSource !== "remote"
-      ) {
-        console.log(
-          "Remote capture ignored because another camera source is selected."
-        );
-
+      if (cameraSource !== "remote") {
         return;
       }
 
-      setWaitingForRemotePhoto(
-        true
-      );
+      if (!cameraReady) {
+        setWaitingForRemotePhoto(false);
+        return;
+      }
+
+      setWaitingForRemotePhoto(true);
 
       await sendCaptureCommand();
 
       console.log(
-        "📸 Remote capture command sent"
+        "📸 Capture command sent"
       );
     } catch (error) {
       console.error(
-        "Failed to request remote photo:",
+        "Remote capture error:",
         error
       );
 
-      setWaitingForRemotePhoto(
-        false
-      );
+      setWaitingForRemotePhoto(false);
 
       alert(
-        "Could not communicate with the iPhone/iPad camera. Make sure the camera page is open."
+        "Could not communicate with the iPad/iPhone camera."
       );
     }
   }
@@ -1011,9 +1177,12 @@ function App() {
   function stopCamera() {
     stopAllCameras();
 
-    setWaitingForRemotePhoto(
-      false
-    );
+    setWaitingForRemotePhoto(false);
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
 
     setCountdown(null);
     setIsCounting(false);
@@ -1023,65 +1192,27 @@ function App() {
   // CHANGE CAMERA SOURCE
   // =====================================================
 
-  async function changeCameraSource(
-    source
-  ) {
-    console.log(
-      "🔄 Changing camera source to:",
-      source
-    );
+  async function changeCameraSource(source) {
+    stopCamera();
 
-    /*
-     * Stop countdown first.
-     */
-    if (timerRef.current) {
-      clearInterval(
-        timerRef.current
-      );
-
-      timerRef.current = null;
-    }
-
-    setCountdown(null);
-    setIsCounting(false);
-
-    /*
-     * Stop EVERY local/remote camera.
-     */
-    stopAllCameras();
-
-    setWaitingForRemotePhoto(
-      false
-    );
-
-    /*
-     * Clear old remote command/photo.
-     *
-     * This prevents an old iPad command
-     * from being used after switching to
-     * webcam.
-     */
     try {
-      await clearCaptureCommand();
       await clearRemotePhoto();
+      await clearControllerPreview();
+      await clearControllerResult();
+      await clearCaptureCommand();
     } catch (error) {
       console.error(
-        "Remote session cleanup error:",
+        "Remote cleanup error:",
         error
       );
     }
 
-    /*
-     * Change source AFTER stopping
-     * everything.
-     */
     setCameraSource(source);
 
-    /*
-     * PHONE / IPAD
-     *
-     * We DO NOT start a local camera.
-     */
+    setRemotePreview(null);
+    setRemoteResult(null);
+    setRemotePreviewNumber(null);
+
     if (source === "remote") {
       setCameraReady(false);
       setScreen("camera");
@@ -1089,14 +1220,12 @@ function App() {
       return;
     }
 
-    /*
-     * LOCAL CAMERA
-     */
     setCameraReady(false);
-
-    await detectCameras();
-
     setScreen("camera-device");
+
+    setTimeout(() => {
+      detectCameras();
+    }, 100);
   }
 
   // =====================================================
@@ -1109,56 +1238,79 @@ function App() {
     setCaptureMode(mode);
 
     setPhotos([]);
+    photosRef.current = [];
 
     setSelectedPhotos([]);
 
     setFinalStrip(null);
-
     setFinalPrint(null);
-
     setQrCode(null);
 
     setCountdown(null);
-
     setIsCounting(false);
 
-    setWaitingForRemotePhoto(
-      false
-    );
+    setWaitingForRemotePhoto(false);
 
     setCameraReady(false);
-
     setCameraSource(null);
 
     setRetakingIndex(null);
+    retakingIndexRef.current = null;
 
-    retakingIndexRef.current =
-      null;
+    setRemotePreview(null);
+    setRemoteResult(null);
+    setRemotePreviewNumber(null);
 
-    setScreen(
-      "camera-source"
-    );
+    setScreen("camera-source");
   }
 
   // =====================================================
   // COUNTDOWN
   // =====================================================
 
-  function startCountdown() {
+  async function startCountdown() {
     if (
       isCounting ||
-      !cameraReady ||
       waitingForRemotePhoto
     ) {
+      return;
+    }
+
+    if (!cameraReady) {
+      return;
+    }
+
+    const video =
+      cameraSource === "remote"
+        ? videoRef.current
+        : localCameraVideoRef.current;
+
+    if (!video) {
+      setCameraReady(false);
+      return;
+    }
+
+    if (
+      video.readyState < 2 ||
+      video.videoWidth === 0 ||
+      video.videoHeight === 0
+    ) {
+      setCameraReady(false);
       return;
     }
 
     if (
       retakingIndexRef.current ===
         null &&
-      photos.length >= captureMode
+      photosRef.current.length >=
+        captureMode
     ) {
       return;
+    }
+
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
     }
 
     setIsCounting(true);
@@ -1176,32 +1328,31 @@ function App() {
           return;
         }
 
-        clearInterval(
-          timerRef.current
-        );
+        clearInterval(timerRef.current);
 
         timerRef.current = null;
 
         setCountdown("📸");
 
-        setTimeout(
-          async () => {
-            try {
-              if (
-                cameraSource ===
-                "remote"
-              ) {
-                await requestRemotePhoto();
-              } else {
-                await captureLocalPhoto();
-              }
-            } finally {
-              setCountdown(null);
-              setIsCounting(false);
+        setTimeout(async () => {
+          try {
+            if (
+              cameraSource === "remote"
+            ) {
+              await requestRemotePhoto();
+            } else {
+              await captureLocalPhoto();
             }
-          },
-          600
-        );
+          } catch (error) {
+            console.error(
+              "Capture error:",
+              error
+            );
+          } finally {
+            setCountdown(null);
+            setIsCounting(false);
+          }
+        }, 600);
       }, 1000);
   }
 
@@ -1210,9 +1361,7 @@ function App() {
   // =====================================================
 
   useEffect(() => {
-    if (
-      deviceMode !== "controller"
-    ) {
+    if (deviceMode !== "controller") {
       return;
     }
 
@@ -1225,9 +1374,10 @@ function App() {
       return;
     }
 
-    /*
-     * Retake
-     */
+    // =================================================
+    // RETAKE
+    // =================================================
+
     if (
       retakingIndexRef.current !==
       null
@@ -1237,18 +1387,21 @@ function App() {
           startCountdown();
         }, 1200);
 
-      return () =>
+      return () => {
         clearTimeout(delay);
+      };
     }
 
-    /*
-     * Finished capturing
-     */
+    // =================================================
+    // FINISHED
+    // =================================================
+
     if (
-      photos.length >= captureMode
+      photosRef.current.length >=
+      captureMode
     ) {
       setSelectedPhotos(
-        photos.map(
+        photosRef.current.map(
           (_, index) => index
         )
       );
@@ -1262,25 +1415,28 @@ function App() {
       return;
     }
 
-    /*
-     * Start next photo
-     */
+    // =================================================
+    // NEXT PHOTO
+    // =================================================
+
     const delay =
       setTimeout(() => {
         startCountdown();
       }, 1200);
 
-    return () =>
+    return () => {
       clearTimeout(delay);
+    };
   }, [
     deviceMode,
     screen,
     cameraReady,
     isCounting,
     waitingForRemotePhoto,
-    photos,
+    photos.length,
     captureMode,
     cameraSource,
+    retakingIndex,
   ]);
 
   // =====================================================
@@ -1288,29 +1444,19 @@ function App() {
   // =====================================================
 
   function togglePhoto(index) {
-    setSelectedPhotos(
-      (previous) => {
-        if (
-          previous.includes(index)
-        ) {
-          return previous.filter(
-            (item) =>
-              item !== index
-          );
-        }
-
-        if (
-          previous.length >= 4
-        ) {
-          return previous;
-        }
-
-        return [
-          ...previous,
-          index,
-        ];
+    setSelectedPhotos((previous) => {
+      if (previous.includes(index)) {
+        return previous.filter(
+          (item) => item !== index
+        );
       }
-    );
+
+      if (previous.length >= 4) {
+        return previous;
+      }
+
+      return [...previous, index];
+    });
   }
 
   // =====================================================
@@ -1324,34 +1470,23 @@ function App() {
     setRetakingIndex(index);
 
     setCountdown(null);
-
     setIsCounting(false);
 
-    setWaitingForRemotePhoto(
-      false
-    );
+    setWaitingForRemotePhoto(false);
 
-    if (
-      cameraSource === "remote"
-    ) {
-      /*
-       * Do NOT disconnect the iPad.
-       *
-       * The iPad is already connected.
-       */
+    if (cameraSource === "remote") {
       setCameraReady(true);
-
       setScreen("camera");
 
       return;
     }
 
-    /*
-     * LOCAL RETAKE
-     */
     setCameraReady(false);
-
     setScreen("camera");
+
+    await new Promise((resolve) =>
+      requestAnimationFrame(resolve)
+    );
 
     const started =
       await startLocalCamera();
@@ -1393,6 +1528,7 @@ function App() {
         "Please upload a JPG or PNG."
       );
 
+      event.target.value = "";
       return;
     }
 
@@ -1400,279 +1536,321 @@ function App() {
       new FileReader();
 
     reader.onload = () => {
-      setTemplate(
-        reader.result
-      );
+      const result = reader.result;
 
-      detectTemplateSlots(
-        reader.result
+      if (typeof result !== "string") {
+        alert(
+          "Could not read the template."
+        );
+
+        return;
+      }
+
+      setTemplate(result);
+
+      detectTemplateSlots(result);
+    };
+
+    reader.onerror = () => {
+      alert(
+        "Could not read the template file."
       );
     };
 
     reader.readAsDataURL(file);
+
+    // Allows the same file to be selected again.
+    event.target.value = "";
   }
 
   // =====================================================
   // DETECT TEMPLATE SLOTS
   // =====================================================
 
-  async function detectTemplateSlots(
-    imageSrc
-  ) {
-    const image = new Image();
+  async function detectTemplateSlots(imageSrc) {
+    try {
+      const image = new Image();
 
-    image.src = imageSrc;
+      image.src = imageSrc;
 
-    await new Promise(
-      (resolve) => {
-        image.onload = resolve;
-      }
-    );
-
-    const canvas =
-      document.createElement(
-        "canvas"
+      await new Promise(
+        (resolve, reject) => {
+          image.onload = resolve;
+          image.onerror = reject;
+        }
       );
 
-    canvas.width =
-      image.width;
+      const canvas =
+        document.createElement("canvas");
 
-    canvas.height =
-      image.height;
+      canvas.width = image.width;
+      canvas.height = image.height;
 
-    const ctx =
-      canvas.getContext("2d");
+      const ctx =
+        canvas.getContext("2d");
 
-    if (!ctx) {
-      return;
-    }
+      if (!ctx) {
+        return;
+      }
 
-    ctx.drawImage(
-      image,
-      0,
-      0,
-      image.width,
-      image.height
-    );
-
-    const data =
-      ctx.getImageData(
+      ctx.drawImage(
+        image,
         0,
         0,
         image.width,
         image.height
-      ).data;
-
-    const width =
-      image.width;
-
-    const height =
-      image.height;
-
-    const mask =
-      new Uint8Array(
-        width * height
       );
 
-    for (
-      let y = 0;
-      y < height;
-      y++
-    ) {
+      const data =
+        ctx.getImageData(
+          0,
+          0,
+          image.width,
+          image.height
+        ).data;
+
+      const width = image.width;
+      const height = image.height;
+
+      const mask =
+        new Uint8Array(width * height);
+
+      // =================================================
+      // GREEN MASK
+      // =================================================
+
       for (
-        let x = 0;
-        x < width;
-        x++
+        let y = 0;
+        y < height;
+        y++
       ) {
-        const i =
-          (y * width + x) * 4;
-
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-
-        if (
-          g > 120 &&
-          g > r * 1.5 &&
-          g > b * 1.3
+        for (
+          let x = 0;
+          x < width;
+          x++
         ) {
-          mask[
-            y * width + x
-          ] = 1;
-        }
-      }
-    }
+          const i =
+            (y * width + x) * 4;
 
-    const visited =
-      new Uint8Array(
-        width * height
-      );
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
 
-    const slots = [];
-
-    for (
-      let y = 0;
-      y < height;
-      y++
-    ) {
-      for (
-        let x = 0;
-        x < width;
-        x++
-      ) {
-        const index =
-          y * width + x;
-
-        if (
-          !mask[index] ||
-          visited[index]
-        ) {
-          continue;
-        }
-
-        const queue = [
-          [x, y],
-        ];
-
-        visited[index] = 1;
-
-        let minX = x;
-        let minY = y;
-
-        let maxX = x;
-        let maxY = y;
-
-        let area = 0;
-
-        while (
-          queue.length > 0
-        ) {
-          const [
-            cx,
-            cy,
-          ] = queue.pop();
-
-          area++;
-
-          minX = Math.min(
-            minX,
-            cx
-          );
-
-          minY = Math.min(
-            minY,
-            cy
-          );
-
-          maxX = Math.max(
-            maxX,
-            cx
-          );
-
-          maxY = Math.max(
-            maxY,
-            cy
-          );
-
-          const neighbors = [
-            [cx + 1, cy],
-            [cx - 1, cy],
-            [cx, cy + 1],
-            [cx, cy - 1],
-          ];
-
-          for (
-            const [
-              nx,
-              ny,
-            ] of neighbors
+          if (
+            g > 120 &&
+            g > r * 1.5 &&
+            g > b * 1.3
           ) {
-            if (
-              nx < 0 ||
-              ny < 0 ||
-              nx >= width ||
-              ny >= height
-            ) {
-              continue;
-            }
-
-            const ni =
-              ny * width + nx;
-
-            if (
-              mask[ni] &&
-              !visited[ni]
-            ) {
-              visited[ni] = 1;
-
-              queue.push([
-                nx,
-                ny,
-              ]);
-            }
+            mask[y * width + x] = 1;
           }
         }
+      }
 
-        const boxWidth =
-          maxX - minX + 1;
+      const visited =
+        new Uint8Array(width * height);
 
-        const boxHeight =
-          maxY - minY + 1;
+      const slots = [];
 
-        if (
-          area > 10000 &&
-          boxWidth > 100 &&
-          boxHeight > 100
+      // =================================================
+      // CONNECTED COMPONENTS
+      // =================================================
+
+      for (
+        let y = 0;
+        y < height;
+        y++
+      ) {
+        for (
+          let x = 0;
+          x < width;
+          x++
         ) {
-          slots.push({
-            x: minX,
-            y: minY,
-            width: boxWidth,
-            height: boxHeight,
-            area,
-          });
+          const index =
+            y * width + x;
+
+          if (
+            !mask[index] ||
+            visited[index]
+          ) {
+            continue;
+          }
+
+          const queue = [[x, y]];
+
+          visited[index] = 1;
+
+          let minX = x;
+          let minY = y;
+          let maxX = x;
+          let maxY = y;
+          let area = 0;
+
+          while (
+            queue.length > 0
+          ) {
+            const [
+              cx,
+              cy,
+            ] = queue.pop();
+
+            area++;
+
+            minX = Math.min(
+              minX,
+              cx
+            );
+
+            minY = Math.min(
+              minY,
+              cy
+            );
+
+            maxX = Math.max(
+              maxX,
+              cx
+            );
+
+            maxY = Math.max(
+              maxY,
+              cy
+            );
+
+            const neighbors = [
+              [cx + 1, cy],
+              [cx - 1, cy],
+              [cx, cy + 1],
+              [cx, cy - 1],
+            ];
+
+            for (
+              const [
+                nx,
+                ny,
+              ] of neighbors
+            ) {
+              if (
+                nx < 0 ||
+                ny < 0 ||
+                nx >= width ||
+                ny >= height
+              ) {
+                continue;
+              }
+
+              const ni =
+                ny * width + nx;
+
+              if (
+                mask[ni] &&
+                !visited[ni]
+              ) {
+                visited[ni] = 1;
+
+                queue.push([
+                  nx,
+                  ny,
+                ]);
+              }
+            }
+          }
+
+          const boxWidth =
+            maxX - minX + 1;
+
+          const boxHeight =
+            maxY - minY + 1;
+
+          if (
+            area > 10000 &&
+            boxWidth > 100 &&
+            boxHeight > 100
+          ) {
+            slots.push({
+              x: minX,
+              y: minY,
+              width: boxWidth,
+              height: boxHeight,
+              area,
+            });
+          }
         }
       }
-    }
 
-    slots.sort(
-      (a, b) => {
+      // =================================================
+      // SORT SLOTS
+      // =================================================
+
+      slots.sort((a, b) => {
         if (
-          Math.abs(
-            a.y - b.y
-          ) < 50
+          Math.abs(a.y - b.y) < 50
         ) {
           return a.x - b.x;
         }
 
         return a.y - b.y;
-      }
-    );
+      });
 
-    let usableSlots;
+      // =================================================
+      // FIX 4R TEMPLATE
+      //
+      // Original template:
+      // 1200 × 1800
+      //
+      // Left strip:
+      // 600 × 1800
+      //
+      // Therefore X/W must be multiplied by 0.5.
+      // Y/H stay unchanged.
+      // =================================================
 
-    if (
-      image.width === PRINT_WIDTH &&
-      image.height === PRINT_HEIGHT
-    ) {
-      usableSlots =
-        slots.filter(
-          (slot) =>
-            slot.x <
-            image.width / 2
+      let usableSlots;
+
+      if (
+        image.width === PRINT_WIDTH &&
+        image.height === PRINT_HEIGHT
+      ) {
+        usableSlots = slots
+          .filter(
+            (slot) =>
+              slot.x <
+              image.width / 2
+          )
+          .map((slot) => ({
+            x: slot.x * 0.5,
+            y: slot.y,
+            width: slot.width * 0.5,
+            height: slot.height,
+            area:
+              slot.area * 0.5,
+          }));
+      } else {
+        usableSlots = slots.map(
+          (slot) => ({
+            ...slot,
+          })
         );
-    } else {
-      usableSlots = slots;
+      }
+
+      setTemplateSlots(
+        usableSlots
+      );
+
+      console.log(
+        "Detected template slots:",
+        usableSlots
+      );
+    } catch (error) {
+      console.error(
+        "Template detection error:",
+        error
+      );
+
+      setTemplateSlots([]);
+
+      alert(
+        "Could not detect the photo slots in this template."
+      );
     }
-
-    setTemplateSlots(
-      usableSlots
-    );
-
-    console.log(
-      "Detected template slots:",
-      usableSlots
-    );
   }
 
   // =====================================================
@@ -1682,13 +1860,17 @@ function App() {
   function loadImage(src) {
     return new Promise(
       (resolve, reject) => {
-        const image =
-          new Image();
+        const image = new Image();
 
         image.onload = () =>
           resolve(image);
 
-        image.onerror = reject;
+        image.onerror = () =>
+          reject(
+            new Error(
+              "Failed to load image."
+            )
+          );
 
         image.src = src;
       }
@@ -1728,14 +1910,16 @@ function App() {
         boxRatio;
 
       sx =
-        (image.width - sw) / 2;
+        (image.width - sw) /
+        2;
     } else {
       sh =
         image.width /
         boxRatio;
 
       sy =
-        (image.height - sh) / 2;
+        (image.height - sh) /
+        2;
     }
 
     ctx.drawImage(
@@ -1752,7 +1936,7 @@ function App() {
   }
 
   // =====================================================
-  // CREATE SINGLE STRIP
+  // CREATE STRIP
   // =====================================================
 
   async function createStrip() {
@@ -1761,17 +1945,18 @@ function App() {
         "Please upload your template first."
       );
 
-      return;
+      return false;
     }
 
     if (
-      selectedPhotos.length === 0
+      selectedPhotos.length ===
+      0
     ) {
       alert(
         "Please select at least one photo."
       );
 
-      return;
+      return false;
     }
 
     if (
@@ -1779,17 +1964,15 @@ function App() {
       selectedPhotos.length
     ) {
       alert(
-        `Only ${templateSlots.length} photo slots were detected. Please make sure your template has enough green photo boxes.`
+        `Only ${templateSlots.length} photo slots were detected.`
       );
 
-      return;
+      return false;
     }
 
     try {
       const templateImage =
-        await loadImage(
-          template
-        );
+        await loadImage(template);
 
       const canvas =
         document.createElement(
@@ -1803,13 +1986,15 @@ function App() {
         STRIP_HEIGHT;
 
       const ctx =
-        canvas.getContext(
-          "2d"
-        );
+        canvas.getContext("2d");
 
       if (!ctx) {
-        return;
+        return false;
       }
+
+      // =================================================
+      // DRAW TEMPLATE
+      // =================================================
 
       if (
         templateImage.width ===
@@ -1817,16 +2002,17 @@ function App() {
         templateImage.height ===
           PRINT_HEIGHT
       ) {
+        // Take only the LEFT 600px of the 4R template.
         ctx.drawImage(
           templateImage,
           0,
           0,
-          600,
-          1800,
+          PRINT_WIDTH / 2,
+          PRINT_HEIGHT,
           0,
           0,
-          600,
-          1800
+          STRIP_WIDTH,
+          STRIP_HEIGHT
         );
       } else {
         ctx.drawImage(
@@ -1852,20 +2038,55 @@ function App() {
           selectedPhotos.length
         );
 
+      // =================================================
+      // INSERT PHOTOS
+      // =================================================
+
       for (
         let i = 0;
         i < slots.length;
         i++
       ) {
-        const slot =
-          slots[i];
+        const slot = slots[i];
+
+        const selectedIndex =
+          selectedPhotos[i];
+
+        const photoSrc =
+          photosRef.current[
+            selectedIndex
+          ];
+
+        if (!photoSrc) {
+          console.error(
+            "Photo not found:",
+            selectedIndex
+          );
+
+          continue;
+        }
 
         const photo =
-          await loadImage(
-            photos[
-              selectedPhotos[i]
-            ]
-          );
+          await loadImage(photoSrc);
+
+        const slotWidth =
+          Math.round(slot.width);
+
+        const slotHeight =
+          Math.round(slot.height);
+
+        const slotX =
+          Math.round(slot.x);
+
+        const slotY =
+          Math.round(slot.y);
+
+        if (
+          slotWidth <= 0 ||
+          slotHeight <= 0
+        ) {
+          continue;
+        }
 
         const photoCanvas =
           document.createElement(
@@ -1873,10 +2094,10 @@ function App() {
           );
 
         photoCanvas.width =
-          slot.width;
+          slotWidth;
 
         photoCanvas.height =
-          slot.height;
+          slotHeight;
 
         const photoCtx =
           photoCanvas.getContext(
@@ -1892,33 +2113,37 @@ function App() {
           photo,
           0,
           0,
-          slot.width,
-          slot.height
+          slotWidth,
+          slotHeight
         );
 
         const photoData =
           photoCtx.getImageData(
             0,
             0,
-            slot.width,
-            slot.height
+            slotWidth,
+            slotHeight
           );
+
+        // =================================================
+        // REPLACE GREEN PIXELS
+        // =================================================
 
         for (
           let sy = 0;
-          sy < slot.height;
+          sy < slotHeight;
           sy++
         ) {
           for (
             let sx = 0;
-            sx < slot.width;
+            sx < slotWidth;
             sx++
           ) {
             const templateX =
-              slot.x + sx;
+              slotX + sx;
 
             const templateY =
-              slot.y + sy;
+              slotY + sy;
 
             if (
               templateX < 0 ||
@@ -1941,7 +2166,7 @@ function App() {
             const photoIndex =
               (
                 sy *
-                  slot.width +
+                  slotWidth +
                 sx
               ) * 4;
 
@@ -2001,10 +2226,12 @@ function App() {
       );
 
       // =================================================
-      // UPLOAD + QR
+      // CLOUDINARY + QR
       // =================================================
 
       setIsUploading(true);
+
+      let finalResult;
 
       try {
         const baseStrip =
@@ -2014,44 +2241,37 @@ function App() {
           );
 
         const response =
-          await fetch(
-            baseStrip
-          );
+          await fetch(baseStrip);
 
         const blob =
           await response.blob();
 
         const photoUrl =
-          await uploadPhoto(
-            blob
-          );
-
-        console.log(
-          "Cloudinary photo URL:",
-          photoUrl
-        );
+          await uploadPhoto(blob);
 
         const qr =
-          await generateQR(
-            photoUrl
-          );
+          await generateQR(photoUrl);
 
         const qrImage =
           await loadImage(qr);
 
-        const qrSize = 105;
-        const qrMargin = 20;
+        // =================================================
+        // QR CODE
+        // =================================================
+
+        const qrSize = 65;
+        const qrMargin = 12;
 
         ctx.fillStyle = "white";
 
         ctx.fillRect(
-          qrMargin - 5,
+          qrMargin - 3,
           STRIP_HEIGHT -
             qrSize -
             qrMargin -
-            5,
-          qrSize + 10,
-          qrSize + 10
+            3,
+          qrSize + 6,
+          qrSize + 6
         );
 
         ctx.drawImage(
@@ -2064,68 +2284,89 @@ function App() {
           qrSize
         );
 
-        const finalResult =
+        finalResult =
           canvas.toDataURL(
             "image/jpeg",
             0.96
           );
 
-        setFinalStrip(
-          finalResult
-        );
-
         setQrCode(qr);
-
-        saveGallery(
-          finalResult
-        );
-
-        await createTwoUpPrint(
-          finalResult
-        );
       } catch (error) {
+        // =================================================
+        // FALLBACK
+        // =================================================
+
         console.error(
           "Cloudinary / QR error:",
           error
         );
 
-        alert(
-          "The photo was created, but the QR code could not be generated."
-        );
-
-        const fallback =
+        finalResult =
           canvas.toDataURL(
             "image/jpeg",
             0.96
           );
 
-        setFinalStrip(
-          fallback
-        );
-
-        saveGallery(
-          fallback
-        );
-
-        await createTwoUpPrint(
-          fallback
-        );
-      } finally {
-        setIsUploading(false);
+        setQrCode(null);
       }
 
+      setFinalStrip(finalResult);
+
+      saveGallery(finalResult);
+
+      // =================================================
+      // CREATE 4R
+      // =================================================
+
+      const print =
+        await createTwoUpPrint(
+          finalResult
+        );
+
+      // =================================================
+      // SEND FINAL RESULT TO IPAD
+      // =================================================
+
+      if (
+        cameraSource ===
+        "remote"
+      ) {
+        try {
+          await sendControllerResult(
+            finalResult
+          );
+
+          console.log(
+            "🎉 Final result sent to iPad"
+          );
+        } catch (error) {
+          console.error(
+            "Could not send final result to iPad:",
+            error
+          );
+        }
+      }
+
+      setIsUploading(false);
+
+      // IMPORTANT:
+      // Navigation is now INSIDE the successful flow.
       setScreen("result");
+
+      return print;
     } catch (error) {
       console.error(
         "Create strip error:",
         error
       );
 
+      setIsUploading(false);
+
       alert(
         "Something went wrong while creating the photo."
       );
 
-      setIsUploading(false);
+      return false;
     }
   }
 
@@ -2136,65 +2377,81 @@ function App() {
   async function createTwoUpPrint(
     stripImage
   ) {
-    const strip =
-      await loadImage(
-        stripImage
-      );
-
-    const canvas =
-      document.createElement(
-        "canvas"
-      );
-
-    canvas.width =
-      PRINT_WIDTH;
-
-    canvas.height =
-      PRINT_HEIGHT;
-
-    const ctx =
-      canvas.getContext(
-        "2d"
-      );
-
-    if (!ctx) {
+    if (!stripImage) {
       return null;
     }
 
-    ctx.fillStyle = "white";
+    try {
+      const strip =
+        await loadImage(
+          stripImage
+        );
 
-    ctx.fillRect(
-      0,
-      0,
-      PRINT_WIDTH,
-      PRINT_HEIGHT
-    );
+      const canvas =
+        document.createElement(
+          "canvas"
+        );
 
-    ctx.drawImage(
-      strip,
-      0,
-      0,
-      STRIP_WIDTH,
-      STRIP_HEIGHT
-    );
+      canvas.width =
+        PRINT_WIDTH;
 
-    ctx.drawImage(
-      strip,
-      STRIP_WIDTH,
-      0,
-      STRIP_WIDTH,
-      STRIP_HEIGHT
-    );
+      canvas.height =
+        PRINT_HEIGHT;
 
-    const result =
-      canvas.toDataURL(
-        "image/jpeg",
-        0.96
+      const ctx =
+        canvas.getContext(
+          "2d"
+        );
+
+      if (!ctx) {
+        return null;
+      }
+
+      // White background
+      ctx.fillStyle = "white";
+
+      ctx.fillRect(
+        0,
+        0,
+        PRINT_WIDTH,
+        PRINT_HEIGHT
       );
 
-    setFinalPrint(result);
+      // LEFT COPY
+      ctx.drawImage(
+        strip,
+        0,
+        0,
+        STRIP_WIDTH,
+        STRIP_HEIGHT
+      );
 
-    return result;
+      // RIGHT COPY
+      ctx.drawImage(
+        strip,
+        STRIP_WIDTH,
+        0,
+        STRIP_WIDTH,
+        STRIP_HEIGHT
+      );
+
+      const result =
+        canvas.toDataURL(
+          "image/jpeg",
+          0.96
+        );
+
+      setFinalPrint(result);
+
+      return result;
+    } catch (error) {
+      console.error(
+        "4R creation error:",
+        error
+      );
+
+      return null;
+    }
   }
 
   // =====================================================
@@ -2206,29 +2463,40 @@ function App() {
     name
   ) {
     if (!image) {
+      alert(
+        "There is no image available to save."
+      );
+
       return;
     }
 
-    const link =
-      document.createElement(
-        "a"
+    try {
+      const link =
+        document.createElement(
+          "a"
+        );
+
+      link.href = image;
+
+      link.download =
+        name ||
+        `SANDIWA-${Date.now()}.jpg`;
+
+      document.body.appendChild(
+        link
       );
 
-    link.href = image;
+      link.click();
 
-    link.download =
-      name ||
-      `SANDIWA-${Date.now()}.jpg`;
-
-    document.body.appendChild(
-      link
-    );
-
-    link.click();
-
-    document.body.removeChild(
-      link
-    );
+      document.body.removeChild(
+        link
+      );
+    } catch (error) {
+      console.error(
+        "Save image error:",
+        error
+      );
+    }
   }
 
   // =====================================================
@@ -2276,13 +2544,14 @@ function App() {
             padding: 0;
             width: 4in;
             height: 6in;
+            overflow: hidden;
           }
 
           img {
             display: block;
             width: 4in;
             height: 6in;
-            object-fit: contain;
+            object-fit: fill;
           }
         </style>
       </head>
@@ -2291,18 +2560,16 @@ function App() {
 
         <img
           src="${finalPrint}"
+          alt="SANDIWA 4R"
         />
 
         <script>
           window.onload = function () {
-            setTimeout(
-              function () {
-                window.print();
-              },
-              500
-            );
+            setTimeout(function () {
+              window.print();
+            }, 500);
           };
-        </script>
+        <\/script>
 
       </body>
       </html>
@@ -2318,55 +2585,42 @@ function App() {
   async function newSession() {
     stopCamera();
 
-    if (timerRef.current) {
-      clearInterval(
-        timerRef.current
-      );
-
-      timerRef.current = null;
-    }
-
-    /*
-     * Clear remote command/photo.
-     *
-     * This does NOT affect which local
-     * camera Windows detects.
-     */
     try {
-      await clearCaptureCommand();
       await clearRemotePhoto();
+      await clearControllerPreview();
+      await clearControllerResult();
+      await clearCaptureCommand();
     } catch (error) {
       console.error(
-        "Could not reset remote session:",
+        "Remote reset error:",
         error
       );
     }
 
     setPhotos([]);
+    photosRef.current = [];
 
     setSelectedPhotos([]);
 
     setFinalStrip(null);
-
     setFinalPrint(null);
-
     setQrCode(null);
 
     setIsUploading(false);
 
     setCountdown(null);
-
     setIsCounting(false);
 
-    setWaitingForRemotePhoto(
-      false
-    );
+    setWaitingForRemotePhoto(false);
 
     setCameraSource(null);
-
     setCameraReady(false);
 
     setRetakingIndex(null);
+
+    setRemotePreview(null);
+    setRemotePreviewNumber(null);
+    setRemoteResult(null);
 
     retakingIndexRef.current =
       null;
@@ -2386,6 +2640,63 @@ function App() {
   }
 
   // =====================================================
+  // IPAD LISTENS FOR FINAL RESULT / PREVIEW
+  // =====================================================
+
+  useEffect(() => {
+    if (deviceMode !== "camera") {
+      return;
+    }
+
+    const unsubscribe =
+      listenToSession((data) => {
+        if (!data) {
+          return;
+        }
+
+        // =================================================
+        // FINAL RESULT
+        // =================================================
+
+        if (
+          data.controllerResult
+        ) {
+          setRemoteResult(
+            data.controllerResult
+          );
+
+          setRemotePreview(null);
+        }
+
+        // =================================================
+        // PREVIEW
+        // =================================================
+
+        if (
+          data.controllerPreview
+        ) {
+          setRemotePreview(
+            data.controllerPreview
+          );
+
+          if (
+            data.controllerPreviewNumber
+          ) {
+            setRemotePreviewNumber(
+              data.controllerPreviewNumber
+            );
+          }
+        }
+      });
+
+    return () => {
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
+    };
+  }, [deviceMode]);
+
+  // =====================================================
   // CLEANUP
   // =====================================================
 
@@ -2397,20 +2708,45 @@ function App() {
         );
       }
 
-      stopLocalCamera();
-      stopRemoteCamera();
+      if (
+        localCameraStreamRef.current
+      ) {
+        localCameraStreamRef.current
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+      }
+
+      if (streamRef.current) {
+        streamRef.current
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
+      }
     };
   }, []);
 
   // =====================================================
-  // PHONE / IPAD CAMERA SCREEN
+  // IPAD / IPHONE CAMERA SCREEN
   // =====================================================
 
   if (
     deviceMode === "camera"
   ) {
     return (
-      <div className="remote-camera">
+      <div
+        className="remote-camera"
+        style={{
+          position: "relative",
+          width: "100vw",
+          height: "100vh",
+          overflow: "hidden",
+          background: "#000",
+        }}
+      >
+        {/* LIVE CAMERA */}
 
         <video
           ref={videoRef}
@@ -2418,40 +2754,218 @@ function App() {
           playsInline
           muted
           className="remote-camera-video"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            background: "#000",
+            zIndex: 1,
+          }}
         />
 
-        <div className="remote-camera-overlay">
+        {/* =================================================
+            CAPTURED PHOTO PREVIEW
+        ================================================= */}
 
-          <h1>
-            SANDIWA
-          </h1>
+        {remotePreview &&
+          !remoteResult && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 20,
+                background:
+                  "rgba(0,0,0,0.92)",
+                display: "flex",
+                flexDirection:
+                  "column",
+                alignItems:
+                  "center",
+                justifyContent:
+                  "center",
+                padding: "20px",
+              }}
+            >
+              <h1
+                style={{
+                  color: "white",
+                  marginBottom:
+                    "15px",
+                }}
+              >
+                PHOTO{" "}
+                {remotePreviewNumber ||
+                  ""}
+              </h1>
 
-          {cameraReady ? (
-            <>
-              <div className="camera-status">
-                📱 CAMERA READY
-              </div>
+              <img
+                src={
+                  remotePreview
+                }
+                alt="Captured"
+                style={{
+                  maxWidth:
+                    "90%",
+                  maxHeight:
+                    "75%",
+                  objectFit:
+                    "contain",
+                  borderRadius:
+                    "12px",
+                }}
+              />
 
-              <p>
-                Connected to the
-                photobooth controller.
+              <p
+                style={{
+                  color:
+                    "white",
+                  fontSize:
+                    "18px",
+                  marginTop:
+                    "15px",
+                }}
+              >
+                📸 Photo captured!
               </p>
-            </>
-          ) : (
-            <>
-              <div className="camera-status">
-                📷 STARTING CAMERA...
-              </div>
-
-              <p>
-                Please allow camera
-                permission.
-              </p>
-            </>
+            </div>
           )}
 
-        </div>
+        {/* =================================================
+            FINAL RESULT
+        ================================================= */}
 
+        {remoteResult && (
+          <div
+            style={{
+              position:
+                "absolute",
+              inset: 0,
+              zIndex: 30,
+              background:
+                "rgba(0,0,0,0.94)",
+              display: "flex",
+              flexDirection:
+                "column",
+              alignItems:
+                "center",
+              justifyContent:
+                "center",
+              padding: "20px",
+              overflow: "auto",
+            }}
+          >
+            <h1
+              style={{
+                color:
+                  "white",
+                marginBottom:
+                  "15px",
+              }}
+            >
+              🎉 PHOTO READY!
+            </h1>
+
+            <img
+              src={
+                remoteResult
+              }
+              alt="Final SANDIWA"
+              style={{
+                maxWidth:
+                  "80%",
+                maxHeight:
+                  "75%",
+                objectFit:
+                  "contain",
+                borderRadius:
+                  "10px",
+              }}
+            />
+
+            <p
+              style={{
+                color:
+                  "white",
+                fontSize:
+                  "18px",
+                marginTop:
+                  "15px",
+              }}
+            >
+              Your SANDIWA photo is ready!
+            </p>
+          </div>
+        )}
+
+        {/* =================================================
+            CAMERA STATUS
+        ================================================= */}
+
+        {!remotePreview &&
+          !remoteResult && (
+            <div
+              style={{
+                position:
+                  "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                zIndex: 10,
+                padding:
+                  "20px",
+                textAlign:
+                  "center",
+                background:
+                  "linear-gradient(rgba(0,0,0,0.45), transparent)",
+                color:
+                  "white",
+              }}
+            >
+              <h1>
+                SANDIWA
+              </h1>
+
+              {cameraReady ? (
+                <>
+                  <div
+                    style={{
+                      fontWeight:
+                        "bold",
+                      fontSize:
+                        "18px",
+                    }}
+                  >
+                    📱 CAMERA READY
+                  </div>
+
+                  <p>
+                    Look at the
+                    camera!
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div
+                    style={{
+                      fontWeight:
+                        "bold",
+                      fontSize:
+                        "18px",
+                    }}
+                  >
+                    📷 STARTING CAMERA...
+                  </div>
+
+                  <p>
+                    Please allow
+                    camera permission.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
       </div>
     );
   }
@@ -2466,7 +2980,6 @@ function App() {
   ) {
     return (
       <div className="app centered">
-
         <div className="setup-card">
 
           <h2>
@@ -2475,13 +2988,10 @@ function App() {
 
           <p>
             Select the camera you
-            want to use for your
-            photobooth.
+            want to use.
           </p>
 
           <div className="camera-source-grid">
-
-            {/* PHONE / IPAD */}
 
             <button
               className="camera-source-card"
@@ -2505,8 +3015,6 @@ function App() {
               </small>
             </button>
 
-            {/* WEBCAM */}
-
             <button
               className="camera-source-card"
               onClick={() =>
@@ -2528,8 +3036,6 @@ function App() {
               </small>
             </button>
 
-            {/* INTEGRATED */}
-
             <button
               className="camera-source-card"
               onClick={() =>
@@ -2550,8 +3056,6 @@ function App() {
                 Built-in laptop camera
               </small>
             </button>
-
-            {/* DSLR */}
 
             <button
               className="camera-source-card"
@@ -2577,7 +3081,6 @@ function App() {
           </div>
 
           <div className="button-row">
-
             <button
               className="secondary"
               onClick={() =>
@@ -2586,17 +3089,15 @@ function App() {
             >
               BACK
             </button>
-
           </div>
 
         </div>
-
       </div>
     );
   }
 
   // =====================================================
-  // CAMERA DEVICE SELECTION
+  // CAMERA DEVICE
   // =====================================================
 
   if (
@@ -2605,7 +3106,6 @@ function App() {
   ) {
     return (
       <div className="app centered">
-
         <div className="setup-card">
 
           <h2>
@@ -2613,9 +3113,8 @@ function App() {
           </h2>
 
           <p>
-            Choose the exact camera
-            you want to use on this
-            computer.
+            Choose the exact
+            camera.
           </p>
 
           {cameraDevices.length ===
@@ -2657,7 +3156,6 @@ function App() {
                   )
                 }
               >
-
                 {cameraDevices.map(
                   (
                     camera,
@@ -2678,7 +3176,6 @@ function App() {
                     </option>
                   )
                 )}
-
               </select>
 
               <div className="camera-device-info">
@@ -2705,11 +3202,6 @@ function App() {
                   detected.
                 </p>
 
-                <small>
-                  Select the specific
-                  camera above.
-                </small>
-
               </div>
             </>
           )}
@@ -2718,15 +3210,14 @@ function App() {
 
             <button
               className="secondary"
-              onClick={() =>
-                changeCameraSource(
-                  null
-                ).then(() =>
-                  setScreen(
-                    "camera-source"
-                  )
-                )
-              }
+              onClick={() => {
+                stopLocalCamera();
+                setCameraReady(false);
+                setCameraSource(null);
+                setScreen(
+                  "camera-source"
+                );
+              }}
             >
               BACK
             </button>
@@ -2736,12 +3227,23 @@ function App() {
               <button
                 className="primary"
                 onClick={async () => {
+                  setScreen(
+                    "camera"
+                  );
+
+                  await new Promise(
+                    (resolve) =>
+                      requestAnimationFrame(
+                        resolve
+                      )
+                  );
+
                   const started =
                     await startLocalCamera();
 
-                  if (started) {
+                  if (!started) {
                     setScreen(
-                      "camera"
+                      "camera-device"
                     );
                   }
                 }}
@@ -2753,7 +3255,6 @@ function App() {
           </div>
 
         </div>
-
       </div>
     );
   }
@@ -2883,9 +3384,12 @@ function App() {
 
           <div
             style={{
-              marginTop: "20px",
-              textAlign: "center",
-              fontSize: "14px",
+              marginTop:
+                "20px",
+              textAlign:
+                "center",
+              fontSize:
+                "14px",
               opacity: 0.7,
             }}
           >
@@ -2917,8 +3421,6 @@ function App() {
     return (
       <div className="camera-page">
 
-        {/* LOCAL CAMERA */}
-
         {cameraSource !==
           "remote" && (
           <video
@@ -2934,20 +3436,28 @@ function App() {
 
         <div
           style={{
-            position: "absolute",
-            top: "20px",
-            left: "20px",
-            right: "20px",
-            zIndex: 10,
-            display: "flex",
+            position:
+              "absolute",
+            top:
+              "20px",
+            left:
+              "20px",
+            right:
+              "20px",
+            zIndex:
+              10,
+            display:
+              "flex",
             justifyContent:
               "space-between",
-            color: "white",
-            fontWeight: "bold",
-            fontSize: "18px",
+            color:
+              "white",
+            fontWeight:
+              "bold",
+            fontSize:
+              "18px",
           }}
         >
-
           <div>
             SANDIWA
           </div>
@@ -2956,20 +3466,19 @@ function App() {
             {cameraSource ===
             "remote"
               ? cameraReady
-                ? "📱 IPHONE / IPAD CONNECTED"
-                : "🔴 WAITING FOR IPHONE / IPAD"
+                ? "📱 IPAD CONNECTED"
+                : "🔴 WAITING FOR IPAD"
               : cameraReady
               ? "🎥 LOCAL CAMERA CONNECTED"
               : "🔴 WAITING FOR LOCAL CAMERA"}
           </div>
-
         </div>
 
         <div
           className="camera-overlay"
           style={{
             background:
-              "rgba(0,0,0,0.75)",
+              "transparent",
           }}
         >
 
@@ -2993,25 +3502,25 @@ function App() {
             <div
               className="loading"
               style={{
-                textAlign: "center",
-                maxWidth: "500px",
+                textAlign:
+                  "center",
+                maxWidth:
+                  "500px",
               }}
             >
-
               <h2>
                 {cameraSource ===
                 "remote"
-                  ? "📱 Waiting for phone/iPad..."
+                  ? "📱 Waiting for iPad..."
                   : "📷 Starting camera..."}
               </h2>
 
               <p>
                 {cameraSource ===
                 "remote"
-                  ? "Open the SANDIWA camera link on your iPad or iPhone."
+                  ? "Open the SANDIWA camera link on your iPad."
                   : "Please allow camera access."}
               </p>
-
             </div>
           )}
 
@@ -3046,7 +3555,6 @@ function App() {
           </div>
 
         </div>
-
       </div>
     );
   }
@@ -3068,8 +3576,7 @@ function App() {
           </h2>
 
           <p>
-            Select 1–4 photos for
-            your final strip.
+            Select 1–4 photos.
           </p>
 
           <div className="selection-grid">
@@ -3199,12 +3706,10 @@ function App() {
 
           {template ? (
             <div className="template-preview">
-
               <img
                 src={template}
                 alt="Template"
               />
-
             </div>
           ) : (
             <div className="template-empty">
@@ -3358,6 +3863,7 @@ function App() {
 
             <button
               className="primary"
+              disabled={!finalStrip}
               onClick={() =>
                 saveImage(
                   finalStrip,
@@ -3370,6 +3876,7 @@ function App() {
 
             <button
               className="primary"
+              disabled={!finalPrint}
               onClick={() =>
                 saveImage(
                   finalPrint,
@@ -3382,6 +3889,7 @@ function App() {
 
             <button
               className="print-button"
+              disabled={!finalPrint}
               onClick={
                 printTwoUp
               }
@@ -3456,6 +3964,14 @@ function App() {
                           await createTwoUpPrint(
                             item.image
                           );
+
+                        if (!print) {
+                          alert(
+                            "Could not create the 4R image."
+                          );
+
+                          return;
+                        }
 
                         setFinalPrint(
                           print
