@@ -974,7 +974,7 @@ function App() {
     }
   }
 
-  // =====================================================
+ // =====================================================
 // LAPTOP LISTENS FOR REMOTE CAMERA
 // =====================================================
 
@@ -984,32 +984,26 @@ useEffect(() => {
   }
 
   const unsubscribe = listenToSession((data) => {
-    if (!data) {
-      return;
-    }
+    if (!data) return;
 
-    console.log("📡 Controller received Firebase data:", data);
+    console.log("🔥 Controller Firebase data:", data);
 
-    // =================================================
-    // IPAD CAMERA CONNECTED
-    // =================================================
+    // ================================================
+    // REMOTE CAMERA STATUS
+    // ================================================
 
     if (
-      cameraSource === "remote" &&
-      data.cameraStatus === "ready"
+      data.cameraStatus === "ready" &&
+      data.deviceType === "phone-camera"
     ) {
+      console.log("📱 IPHONE/IPAD DETECTED!");
+
       setCameraReady(true);
     }
 
-    // =================================================
-    // REMOTE PHOTO RECEIVED
-    // =================================================
-
-    if (
-      cameraSource !== "remote"
-    ) {
-      return;
-    }
+    // ================================================
+    // REMOTE PHOTO
+    // ================================================
 
     if (
       data.status === "photo-ready" &&
@@ -1019,15 +1013,9 @@ useEffect(() => {
     ) {
       remotePhotoIdRef.current = data.photoId;
 
-      console.log(
-        "📱 Photo received from iPad:",
-        data.photoId
-      );
+      console.log("📸 Remote photo received");
 
-      // RETAKE
-      if (
-        retakingIndexRef.current !== null
-      ) {
+      if (retakingIndexRef.current !== null) {
         const index =
           retakingIndexRef.current;
 
@@ -1044,30 +1032,24 @@ useEffect(() => {
             return previous;
           }
 
-          return [...previous, index];
+          return [
+            ...previous,
+            index,
+          ];
         });
 
         retakingIndexRef.current = null;
         setRetakingIndex(null);
 
-        // Photo number is the retake number
-        const photoNumber = index + 1;
-
-        setRemotePreviewNumber(photoNumber);
+        setRemotePreviewNumber(
+          index + 1
+        );
 
         sendControllerPreview(
           data.photo,
-          photoNumber
-        ).catch((error) => {
-          console.error(
-            "Could not send retake preview:",
-            error
-          );
-        });
-      }
-
-      // NORMAL PHOTO
-      else {
+          index + 1
+        ).catch(console.error);
+      } else {
         const photoNumber =
           photos.length + 1;
 
@@ -1083,24 +1065,15 @@ useEffect(() => {
         sendControllerPreview(
           data.photo,
           photoNumber
-        ).catch((error) => {
-          console.error(
-            "Could not send preview:",
-            error
-          );
-        });
+        ).catch(console.error);
       }
 
       setRemotePreview(data.photo);
       setWaitingForRemotePhoto(false);
 
-      // Clear Firebase photo after processing
-      clearRemotePhoto().catch((error) => {
-        console.error(
-          "Could not clear remote photo:",
-          error
-        );
-      });
+      clearRemotePhoto().catch(
+        console.error
+      );
     }
   });
 
@@ -1109,9 +1082,23 @@ useEffect(() => {
   };
 }, [
   deviceMode,
-  cameraSource,
   photos.length,
 ]);
+
+// =====================================================
+// SAFE CLEAR REMOTE PHOTO
+// =====================================================
+
+async function clearRemotePhotoSafely() {
+  try {
+    await clearRemotePhoto();
+  } catch (error) {
+    console.error(
+      "Could not clear remote photo:",
+      error
+    );
+  }
+}
 
   // =====================================================
   // SAFE CLEAR REMOTE PHOTO
