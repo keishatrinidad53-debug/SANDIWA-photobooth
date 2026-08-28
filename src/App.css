@@ -306,12 +306,10 @@ button {
 
 .camera-page {
   position: fixed;
-
   inset: 0;
-
   background: black;
-
   overflow: hidden;
+  z-index: 1;
 }
 
 .camera-video {

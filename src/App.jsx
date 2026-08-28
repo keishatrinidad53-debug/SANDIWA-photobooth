@@ -3470,12 +3470,12 @@ async function clearRemotePhotoSafely() {
         </div>
 
         <div
-          className="camera-overlay"
-          style={{
-            background:
-              "transparent",
-          }}
-        >
+  className="camera-overlay"
+  style={{
+    background: "transparent",
+    pointerEvents: "none",
+  }}
+>
 
           <div className="camera-counter">
 
@@ -3549,12 +3549,71 @@ async function clearRemotePhotoSafely() {
               )
             )}
 
-          </div>
+            </div>
+
+          </div> {/* camera-overlay closes here */}
+
+          {/* CAPTURE BUTTON */}
+          {cameraSource === "remote" &&
+          remoteCameraReady && 
+          !waitingForRemotePhoto && (
+            <button
+              type="button"
+              onClick={async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                console.log("🟢 CAPTURE BUTTON CLICKED");
+
+                try {
+                  setWaitingForRemotePhoto(true);
+
+                  const commandId =
+                   await sendCaptureCommand();
+
+                  console.log(
+                    "📸 Capture command sent:",
+                    commandId
+                  );
+                } catch (error) {
+                  console.error(
+                    "❌ Failed to send capture command:",
+                    error
+                  );
+
+                  setWaitingForRemotePhoto(false);
+
+                  alert(
+                    "Could not send the capture command to the iPad."
+                  );
+                }
+              }}
+              style={{
+                position: "fixed",
+                bottom: "40px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                width: "90px",
+                height: "90px",
+                zIndex: 999999,
+                borderRadius: "50%",
+                border: "8px solid white",
+                background: "white",
+                cursor: "pointer",
+                pointerEvents: "auto",
+                touchAction: "manipulation",
+                WebkitTapHighlightColor: "transparent",
+                boxShadow:
+                  "0 4px 20px rgba(0,0,0,0.5)",
+              }}
+            >
+              📸
+            </button>
+          )}
 
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
   // =====================================================
   // PHOTO SELECTION
@@ -4006,5 +4065,4 @@ async function clearRemotePhotoSafely() {
 
   return null;
 }
-
 export default App;
