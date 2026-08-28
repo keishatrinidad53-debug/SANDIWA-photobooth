@@ -94,6 +94,7 @@ function App() {
   const [isCounting, setIsCounting] = useState(false);
 
   const [cameraReady, setCameraReady] = useState(false);
+  const [remoteCameraReady, setRemoteCameraReady] = useState(false);
 
   const [
     waitingForRemotePhoto,
@@ -993,13 +994,13 @@ useEffect(() => {
     // ================================================
 
     if (
-      data.cameraStatus === "ready" &&
-      data.deviceType === "phone-camera"
-    ) {
-      console.log("📱 IPHONE/IPAD DETECTED!");
+  data.cameraStatus === "ready" &&
+  data.deviceType === "phone-camera"
+) {
+  console.log("📱 IPHONE/IPAD DETECTED!");
 
-      setCameraReady(true);
-    }
+  setRemoteCameraReady(true);
+}
 
     // ================================================
     // REMOTE PHOTO
@@ -2632,8 +2633,23 @@ async function clearRemotePhotoSafely() {
     const unsubscribe =
       listenToSession((data) => {
         if (!data) {
+          setCameraReady(false);
           return;
         }
+
+        console.log("🔥 Firebase session:", data);
+
+        if (
+          data.cameraStatus === "ready" &&
+          data.deviceType === "phone-camera"
+        ) {
+          console.log("📱 IPHONE/IPAD DETECTED!");
+          setCameraReady(true);
+        }
+
+        // IMPORTANT:
+        // Do NOT immediately set cameraReady(false)
+        // just because another Firebase field changed.
 
         // =================================================
         // FINAL RESULT
@@ -3374,9 +3390,8 @@ async function clearRemotePhotoSafely() {
               opacity: 0.7,
             }}
           >
-            {cameraSource ===
-            "remote"
-              ? cameraReady
+            {cameraSource === "remote"
+            ? remoteCameraReady
                 ? "📱 PHONE / IPAD CONNECTED"
                 : "📱 PHONE / IPAD NOT CONNECTED"
               : cameraSource
@@ -3444,14 +3459,13 @@ async function clearRemotePhotoSafely() {
           </div>
 
           <div>
-            {cameraSource ===
-            "remote"
-              ? cameraReady
-                ? "📱 IPAD CONNECTED"
-                : "🔴 WAITING FOR IPAD"
-              : cameraReady
-              ? "🎥 LOCAL CAMERA CONNECTED"
-              : "🔴 WAITING FOR LOCAL CAMERA"}
+           {cameraSource === "remote"
+  ? remoteCameraReady
+    ? "📱 IPAD CONNECTED"
+    : "🔴 WAITING FOR IPAD"
+  : cameraReady
+  ? "🎥 LOCAL CAMERA CONNECTED"
+  : "🔴 WAITING FOR LOCAL CAMERA"}
           </div>
         </div>
 
@@ -3479,7 +3493,9 @@ async function clearRemotePhotoSafely() {
 
           </div>
 
-          {!cameraReady && (
+          {(cameraSource === "remote"
+  ? !remoteCameraReady
+  : !cameraReady) && (
             <div
               className="loading"
               style={{
