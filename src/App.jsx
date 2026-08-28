@@ -1,9 +1,12 @@
+const CAMERA_TIMEOUT = 12000;
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
 import {
   sendPhoto,
   sendCameraReady,
+  sendCameraHeartbeat,
+  setupCameraConnection,
   listenToSession,
   clearRemotePhoto,
   sendCaptureCommand,
@@ -54,6 +57,7 @@ function App() {
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const canvasRef = useRef(null);
 
   const localCameraVideoRef = useRef(null);
   const localCameraStreamRef = useRef(null);
@@ -66,10 +70,14 @@ function App() {
   const retakingIndexRef = useRef(null);
 
   const cameraOperationRef = useRef(0);
+  const remoteCameraLastSeenRef = useRef(0);
 
-  // IMPORTANT:
-  // Keeps the latest photos available inside Firebase listeners.
+  // Keeps latest photos immediately available.
   const photosRef = useRef([]);
+
+  // Prevents createStrip from being triggered twice
+  // when Firebase sends the same final photo more than once.
+  const processingRemoteFinalRef = useRef(false);
 
   // =====================================================
   // SCREEN
@@ -301,114 +309,163 @@ function App() {
     setCameraReady(false);
   }
 
-  // =====================================================
-  // IPAD / IPHONE REMOTE CAMERA
-  // =====================================================
+ // =====================================================
+// IPAD / IPHONE REMOTE CAMERA
+// =====================================================
 
-  useEffect(() => {
-    if (deviceMode !== "camera") {
-      return;
-    }
+useEffect(() => {
+  if (deviceMode !== "camera") {
+    return;
+  }
 
-    let active = true;
+  let active = true;
+  let heartbeatInterval = null;
 
-    async function startRemoteCamera() {
-      try {
-        if (
-          !navigator.mediaDevices ||
-          !navigator.mediaDevices.getUserMedia
-        ) {
-          throw new Error(
-            "Camera API is not supported by this browser."
-          );
-        }
+  async function startRemoteCamera() {
+    try {
+      if (
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia
+      ) {
+        throw new Error(
+          "Camera API is not supported by this browser."
+        );
+      }
 
-        console.log("📱 Starting iPad/iPhone camera...");
+      console.log(
+        "📱 Starting iPad/iPhone camera..."
+      );
 
-        const stream =
-          await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: {
-                ideal: "user",
-              },
-              width: {
-                ideal: 1920,
-              },
-              height: {
-                ideal: 1080,
-              },
+      // Register Firebase disconnect handler
+      await setupCameraConnection();
+
+      const stream =
+        await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: {
+              ideal: "user",
             },
-            audio: false,
-          });
+            width: {
+              ideal: 1920,
+            },
+            height: {
+              ideal: 1080,
+            },
+          },
+          audio: false,
+        });
 
-        if (!active) {
-          stream.getTracks().forEach((track) => {
-            track.stop();
-          });
+      if (!active) {
+        stream
+          .getTracks()
+          .forEach((track) =>
+            track.stop()
+          );
 
-          return;
-        }
+        return;
+      }
 
-        streamRef.current = stream;
+      streamRef.current = stream;
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-
-          try {
-            await videoRef.current.play();
-          } catch (error) {
-            console.error(
-              "iPad video play error:",
-              error
-            );
-          }
-        }
-
-        setCameraReady(true);
+      if (videoRef.current) {
+        videoRef.current.srcObject =
+          stream;
 
         try {
-          await sendCameraReady();
+          await videoRef.current.play();
         } catch (error) {
           console.error(
-            "Could not send camera ready:",
+            "iPad video play error:",
             error
           );
         }
+      }
 
-        console.log("📱 iPad camera ready");
-      } catch (error) {
-        console.error("Remote camera error:", error);
+      // =================================================
+      // CAMERA READY
+      // =================================================
 
-        setCameraReady(false);
+      setCameraReady(true);
 
-        if (active) {
-          alert(
-            "Camera permission was not granted.\n\nPlease allow camera access and reload the page."
+      await sendCameraReady();
+
+      console.log(
+        "🟢 IPAD CAMERA CONNECTED TO FIREBASE"
+      );
+
+      // =================================================
+      // HEARTBEAT EVERY 5 SECONDS
+      // =================================================
+
+      heartbeatInterval =
+        setInterval(() => {
+          if (!active) {
+            return;
+          }
+
+          sendCameraHeartbeat().catch(
+            (error) => {
+              console.error(
+                "Heartbeat error:",
+                error
+              );
+            }
           );
-        }
-      }
-    }
+        }, 5000);
 
-    startRemoteCamera();
-
-    return () => {
-      active = false;
-
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => {
-          track.stop();
-        });
-
-        streamRef.current = null;
-      }
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
+    } catch (error) {
+      console.error(
+        "❌ Remote camera error:",
+        error
+      );
 
       setCameraReady(false);
-    };
-  }, [deviceMode]);
+
+      if (active) {
+        alert(
+          "Camera permission was not granted.\n\nPlease allow camera access and reload the page."
+        );
+      }
+    }
+  }
+
+  startRemoteCamera();
+
+  return () => {
+    active = false;
+
+    if (heartbeatInterval) {
+      clearInterval(
+        heartbeatInterval
+      );
+
+      heartbeatInterval = null;
+    }
+
+    if (streamRef.current) {
+      streamRef.current
+        .getTracks()
+        .forEach((track) => {
+          try {
+            track.stop();
+          } catch (error) {
+            console.error(
+              "Error stopping remote camera:",
+              error
+            );
+          }
+        });
+
+      streamRef.current = null;
+    }
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
+    setCameraReady(false);
+  };
+}, [deviceMode]);
 
   // =====================================================
   // IPAD LISTENS FOR CAPTURE COMMAND
@@ -517,24 +574,12 @@ function App() {
         );
       }
 
-      console.log(
-        "✅ Photo captured and sent"
-      );
+      console.log("✅ Photo captured and sent");
 
-      // Do not immediately clear the preview if the
-      // controller is going to send its own preview.
       setTimeout(() => {
         setRemotePreview((current) => {
           if (current === photo) {
             return null;
-          }
-
-          return current;
-        });
-
-        setRemotePreviewNumber((current) => {
-          if (remoteResult) {
-            return current;
           }
 
           return current;
@@ -698,15 +743,17 @@ function App() {
         const video =
           localCameraVideoRef.current;
 
-        video.srcObject = stream;
+        if (video) {
+          video.srcObject = stream;
 
-        try {
-          await video.play();
-        } catch (error) {
-          console.error(
-            "Local video play error:",
-            error
-          );
+          try {
+            await video.play();
+          } catch (error) {
+            console.error(
+              "Camera video play error:",
+              error
+            );
+          }
         }
       }
 
@@ -922,13 +969,14 @@ function App() {
         const index =
           retakingIndexRef.current;
 
-        setPhotos((previous) => {
-          const updated = [...previous];
+        const updated =
+          [...photosRef.current];
 
-          updated[index] = photo;
+        updated[index] = photo;
 
-          return updated;
-        });
+        photosRef.current = updated;
+
+        setPhotos(updated);
 
         retakingIndexRef.current =
           null;
@@ -963,10 +1011,12 @@ function App() {
       // NORMAL PHOTO
       // =================================================
 
-      setPhotos((previous) => [
-        ...previous,
-        photo,
-      ]);
+      const updated =
+        [...photosRef.current, photo];
+
+      photosRef.current = updated;
+
+      setPhotos(updated);
     } catch (error) {
       console.error(
         "Local photo error:",
@@ -975,8 +1025,63 @@ function App() {
     }
   }
 
- // =====================================================
-// LAPTOP LISTENS FOR REMOTE CAMERA
+  // =====================================================
+  // LAPTOP LISTENS FOR REMOTE CAMERA
+  // =====================================================
+
+  useEffect(() => {
+    if (deviceMode !== "controller") {
+      return;
+    }
+
+    const unsubscribe = listenToSession((data) => {
+      if (!data) {
+        return;
+      remoteCameraLastSeenRef.current =
+  Number(data.cameraLastSeenAt || 0);
+      }
+
+      console.log(
+        "🔥 Controller Firebase data:",
+        data
+      );
+
+      // ================================================
+// REMOTE CAMERA STATUS
+// ================================================
+
+const lastSeen =
+  Number(data.cameraLastSeenAt || 0);
+
+const cameraIsActuallyConnected =
+  data.cameraStatus === "ready" &&
+  data.deviceType === "phone-camera" &&
+  lastSeen > 0 &&
+  Date.now() - lastSeen <
+    CAMERA_TIMEOUT;
+
+if (cameraIsActuallyConnected) {
+  console.log(
+    "🟢 IPHONE/IPAD IS CONNECTED"
+  );
+
+  setRemoteCameraReady(true);
+  setCameraReady(true);
+} else {
+  console.log(
+    "🔴 IPHONE/IPAD IS NOT CONNECTED"
+  );
+
+  setRemoteCameraReady(false);
+
+  // Only make controller camera unavailable
+  // when using remote camera.
+  if (cameraSource === "remote") {
+    setCameraReady(false);
+  }
+}
+// =====================================================
+// REMOTE CAMERA CONNECTION WATCHDOG
 // =====================================================
 
 useEffect(() => {
@@ -984,122 +1089,225 @@ useEffect(() => {
     return;
   }
 
-  const unsubscribe = listenToSession((data) => {
-    if (!data) return;
-
-    console.log("🔥 Controller Firebase data:", data);
-
-    // ================================================
-    // REMOTE CAMERA STATUS
-    // ================================================
-
-    if (
-  data.cameraStatus === "ready" &&
-  data.deviceType === "phone-camera"
-) {
-  console.log("📱 IPHONE/IPAD DETECTED!");
-
-  setRemoteCameraReady(true);
-}
-
-    // ================================================
-    // REMOTE PHOTO
-    // ================================================
-
-    if (
-      data.status === "photo-ready" &&
-      data.photo &&
-      data.photoId &&
-      data.photoId !== remotePhotoIdRef.current
-    ) {
-      remotePhotoIdRef.current = data.photoId;
-
-      console.log("📸 Remote photo received");
-
-      if (retakingIndexRef.current !== null) {
-        const index =
-          retakingIndexRef.current;
-
-        setPhotos((previous) => {
-          const updated = [...previous];
-
-          updated[index] = data.photo;
-
-          return updated;
-        });
-
-        setSelectedPhotos((previous) => {
-          if (previous.includes(index)) {
-            return previous;
-          }
-
-          return [
-            ...previous,
-            index,
-          ];
-        });
-
-        retakingIndexRef.current = null;
-        setRetakingIndex(null);
-
-        setRemotePreviewNumber(
-          index + 1
-        );
-
-        sendControllerPreview(
-          data.photo,
-          index + 1
-        ).catch(console.error);
-      } else {
-        const photoNumber =
-          photos.length + 1;
-
-        setPhotos((previous) => [
-          ...previous,
-          data.photo,
-        ]);
-
-        setRemotePreviewNumber(
-          photoNumber
-        );
-
-        sendControllerPreview(
-          data.photo,
-          photoNumber
-        ).catch(console.error);
+  const watchdog =
+    setInterval(() => {
+      if (cameraSource !== "remote") {
+        return;
       }
 
-      setRemotePreview(data.photo);
-      setWaitingForRemotePhoto(false);
-
-      clearRemotePhoto().catch(
-        console.error
+      // We don't have a heartbeat timestamp.
+      // Therefore the remote camera cannot
+      // be considered connected.
+      setRemoteCameraReady(
+        (currentStatus) => {
+          return currentStatus;
+        }
       );
-    }
-  });
+    }, 5000);
 
   return () => {
-    unsubscribe();
+    clearInterval(watchdog);
   };
 }, [
   deviceMode,
-  photos.length,
+  cameraSource,
 ]);
 
-// =====================================================
-// SAFE CLEAR REMOTE PHOTO
-// =====================================================
+      // ================================================
+      // REMOTE PHOTO
+      // ================================================
 
-async function clearRemotePhotoSafely() {
-  try {
-    await clearRemotePhoto();
-  } catch (error) {
-    console.error(
-      "Could not clear remote photo:",
-      error
-    );
-  }
-}
+      if (
+        data.status === "photo-ready" &&
+        data.photo &&
+        data.photoId &&
+        data.photoId !== remotePhotoIdRef.current
+      ) {
+        remotePhotoIdRef.current =
+          data.photoId;
+
+        console.log(
+          "📸 Remote photo received"
+        );
+
+        // ============================================
+        // RETAKING A PHOTO
+        // ============================================
+
+        if (
+          retakingIndexRef.current !==
+          null
+        ) {
+          const index =
+            retakingIndexRef.current;
+
+          const updated =
+            [...photosRef.current];
+
+          updated[index] = data.photo;
+
+          photosRef.current = updated;
+
+          setPhotos(updated);
+
+          setSelectedPhotos(
+            (previous) => {
+              if (
+                previous.includes(index)
+              ) {
+                return previous;
+              }
+
+              return [
+                ...previous,
+                index,
+              ];
+            }
+          );
+
+          retakingIndexRef.current =
+            null;
+
+          setRetakingIndex(null);
+
+          setRemotePreviewNumber(
+            index + 1
+          );
+
+          sendControllerPreview(
+            data.photo,
+            index + 1
+          ).catch(console.error);
+        }
+
+        // ============================================
+        // NORMAL PHOTO
+        // ============================================
+
+        else {
+          const updated =
+            [
+              ...photosRef.current,
+              data.photo,
+            ];
+
+          // IMPORTANT:
+          // Update ref immediately BEFORE
+          // calling createStrip().
+          photosRef.current =
+            updated;
+
+          setPhotos(updated);
+
+          const photoNumber =
+            updated.length;
+
+          console.log(
+            `📸 Photo ${photoNumber}/${captureMode} received`
+          );
+
+          setRemotePreviewNumber(
+            photoNumber
+          );
+
+          sendControllerPreview(
+            data.photo,
+            photoNumber
+          ).catch(console.error);
+
+          // ==========================================
+          // AFTER ALL PHOTOS
+          // ==========================================
+
+          if (
+            photoNumber >=
+              captureMode &&
+            !processingRemoteFinalRef.current
+          ) {
+            processingRemoteFinalRef.current =
+              true;
+
+            const allPhotoIndexes =
+              updated
+                .slice(0, captureMode)
+                .map(
+                  (_, index) =>
+                    index
+                );
+
+            console.log(
+              "🎉 ALL REMOTE PHOTOS RECEIVED"
+            );
+
+            setSelectedPhotos(
+              allPhotoIndexes
+            );
+
+            // ------------------------------------------
+            // TEMPLATE CHECK
+            // ------------------------------------------
+
+            if (
+              !template ||
+              templateSlots.length <
+                allPhotoIndexes.length
+            ) {
+              console.log(
+                "⚠️ Template is missing or does not have enough slots."
+              );
+
+              setScreen("template");
+
+              processingRemoteFinalRef.current =
+                false;
+            } else {
+              // ----------------------------------------
+              // AUTOMATICALLY CREATE STRIP
+              // ----------------------------------------
+
+              console.log(
+                "🎨 Automatically creating strip..."
+              );
+
+              createStrip(
+                allPhotoIndexes
+              ).finally(() => {
+                processingRemoteFinalRef.current =
+                  false;
+              });
+            }
+          }
+        }
+
+        // ============================================
+        // SHOW PHOTO
+        // ============================================
+
+        setRemotePreview(
+          data.photo
+        );
+
+        setWaitingForRemotePhoto(
+          false
+        );
+
+        clearRemotePhoto().catch(
+          console.error
+        );
+      }
+    });
+
+    return () => {
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
+    };
+  }, [
+    deviceMode,
+    captureMode,
+    template,
+    templateSlots,
+  ]);
 
   // =====================================================
   // SAFE CLEAR REMOTE PHOTO
@@ -1126,7 +1334,7 @@ async function clearRemotePhotoSafely() {
         return;
       }
 
-      if (!cameraReady) {
+      if (!remoteCameraReady) {
         setWaitingForRemotePhoto(false);
         return;
       }
@@ -1195,14 +1403,22 @@ async function clearRemotePhotoSafely() {
     setRemoteResult(null);
     setRemotePreviewNumber(null);
 
+    processingRemoteFinalRef.current =
+      false;
+
+    remotePhotoIdRef.current =
+      null;
+
     if (source === "remote") {
       setCameraReady(false);
+
       setScreen("camera");
 
       return;
     }
 
     setCameraReady(false);
+
     setScreen("camera-device");
 
     setTimeout(() => {
@@ -1242,6 +1458,15 @@ async function clearRemotePhotoSafely() {
     setRemotePreview(null);
     setRemoteResult(null);
     setRemotePreviewNumber(null);
+
+    processingRemoteFinalRef.current =
+      false;
+
+    remotePhotoIdRef.current =
+      null;
+
+    lastCommandRef.current =
+      null;
 
     setScreen("camera-source");
   }
@@ -1296,6 +1521,10 @@ async function clearRemotePhotoSafely() {
     }
 
     setIsCounting(true);
+
+    // =================================================
+    // 5 SECOND COUNTDOWN
+    // =================================================
 
     let seconds = 5;
 
@@ -1382,12 +1611,29 @@ async function clearRemotePhotoSafely() {
       photosRef.current.length >=
       captureMode
     ) {
+      const allPhotoIndexes =
+        photosRef.current
+          .slice(0, captureMode)
+          .map(
+            (_, index) => index
+          );
+
       setSelectedPhotos(
-        photosRef.current.map(
-          (_, index) => index
-        )
+        allPhotoIndexes
       );
 
+      // IMPORTANT:
+      // Remote sessions are handled directly
+      // by the Firebase listener so createStrip()
+      // is called immediately when the final photo
+      // arrives.
+      if (
+        cameraSource === "remote"
+      ) {
+        return;
+      }
+
+      // Local camera behavior remains the same.
       if (captureMode === 4) {
         setScreen("select");
       } else {
@@ -1455,6 +1701,9 @@ async function clearRemotePhotoSafely() {
     setIsCounting(false);
 
     setWaitingForRemotePhoto(false);
+
+    processingRemoteFinalRef.current =
+      false;
 
     if (cameraSource === "remote") {
       setCameraReady(true);
@@ -1541,7 +1790,6 @@ async function clearRemotePhotoSafely() {
 
     reader.readAsDataURL(file);
 
-    // Allows the same file to be selected again.
     event.target.value = "";
   }
 
@@ -1780,9 +2028,6 @@ async function clearRemotePhotoSafely() {
       //
       // Left strip:
       // 600 × 1800
-      //
-      // Therefore X/W must be multiplied by 0.5.
-      // Y/H stay unchanged.
       // =================================================
 
       let usableSlots;
@@ -1919,9 +2164,19 @@ async function clearRemotePhotoSafely() {
 
   // =====================================================
   // CREATE STRIP
+  //
+  // photoIndexes is optional.
+  //
+  // When called normally:
+  //     uses selectedPhotos
+  //
+  // When called automatically after remote capture:
+  //     uses the indexes passed directly.
   // =====================================================
 
-  async function createStrip() {
+  async function createStrip(
+    photoIndexes = selectedPhotos
+  ) {
     if (!template) {
       alert(
         "Please upload your template first."
@@ -1931,8 +2186,9 @@ async function clearRemotePhotoSafely() {
     }
 
     if (
-      selectedPhotos.length ===
-      0
+      !photoIndexes ||
+      photoIndexes.length ===
+        0
     ) {
       alert(
         "Please select at least one photo."
@@ -1943,7 +2199,7 @@ async function clearRemotePhotoSafely() {
 
     if (
       templateSlots.length <
-      selectedPhotos.length
+      photoIndexes.length
     ) {
       alert(
         `Only ${templateSlots.length} photo slots were detected.`
@@ -1953,6 +2209,11 @@ async function clearRemotePhotoSafely() {
     }
 
     try {
+      console.log(
+        "🎨 createStrip() started with photos:",
+        photoIndexes
+      );
+
       const templateImage =
         await loadImage(template);
 
@@ -1984,7 +2245,9 @@ async function clearRemotePhotoSafely() {
         templateImage.height ===
           PRINT_HEIGHT
       ) {
-        // Take only the LEFT 600px of the 4R template.
+        // Take only the LEFT 600px
+        // of the 4R template.
+
         ctx.drawImage(
           templateImage,
           0,
@@ -2017,7 +2280,7 @@ async function clearRemotePhotoSafely() {
       const slots =
         templateSlots.slice(
           0,
-          selectedPhotos.length
+          photoIndexes.length
         );
 
       // =================================================
@@ -2032,7 +2295,7 @@ async function clearRemotePhotoSafely() {
         const slot = slots[i];
 
         const selectedIndex =
-          selectedPhotos[i];
+          photoIndexes[i];
 
         const photoSrc =
           photosRef.current[
@@ -2047,6 +2310,10 @@ async function clearRemotePhotoSafely() {
 
           continue;
         }
+
+        console.log(
+          `🖼️ Putting photo ${selectedIndex + 1} into slot ${i + 1}`
+        );
 
         const photo =
           await loadImage(photoSrc);
@@ -2207,6 +2474,10 @@ async function clearRemotePhotoSafely() {
         0
       );
 
+      console.log(
+        "✅ Photos inserted into template"
+      );
+
       // =================================================
       // CLOUDINARY + QR
       // =================================================
@@ -2230,6 +2501,11 @@ async function clearRemotePhotoSafely() {
 
         const photoUrl =
           await uploadPhoto(blob);
+
+        console.log(
+          "☁️ Uploaded to Cloudinary:",
+          photoUrl
+        );
 
         const qr =
           await generateQR(photoUrl);
@@ -2273,6 +2549,10 @@ async function clearRemotePhotoSafely() {
           );
 
         setQrCode(qr);
+
+        console.log(
+          "✅ QR code added"
+        );
       } catch (error) {
         // =================================================
         // FALLBACK
@@ -2292,6 +2572,10 @@ async function clearRemotePhotoSafely() {
         setQrCode(null);
       }
 
+      // =================================================
+      // SAVE FINAL STRIP
+      // =================================================
+
       setFinalStrip(finalResult);
 
       saveGallery(finalResult);
@@ -2304,6 +2588,10 @@ async function clearRemotePhotoSafely() {
         await createTwoUpPrint(
           finalResult
         );
+
+      console.log(
+        "✅ 4R two-up created"
+      );
 
       // =================================================
       // SEND FINAL RESULT TO IPAD
@@ -2331,9 +2619,15 @@ async function clearRemotePhotoSafely() {
 
       setIsUploading(false);
 
-      // IMPORTANT:
-      // Navigation is now INSIDE the successful flow.
+      // =================================================
+      // SHOW RESULT
+      // =================================================
+
       setScreen("result");
+
+      console.log(
+        "🎉 PHOTO SESSION COMPLETE"
+      );
 
       return print;
     } catch (error) {
@@ -2613,6 +2907,9 @@ async function clearRemotePhotoSafely() {
     lastCommandRef.current =
       null;
 
+    processingRemoteFinalRef.current =
+      false;
+
     if (
       deviceMode ===
       "controller"
@@ -2637,19 +2934,21 @@ async function clearRemotePhotoSafely() {
           return;
         }
 
-        console.log("🔥 Firebase session:", data);
+        console.log(
+          "🔥 Firebase session:",
+          data
+        );
 
         if (
           data.cameraStatus === "ready" &&
           data.deviceType === "phone-camera"
         ) {
-          console.log("📱 IPHONE/IPAD DETECTED!");
+          console.log(
+            "📱 IPHONE/IPAD DETECTED!"
+          );
+
           setCameraReady(true);
         }
-
-        // IMPORTANT:
-        // Do NOT immediately set cameraReady(false)
-        // just because another Firebase field changed.
 
         // =================================================
         // FINAL RESULT
@@ -3417,35 +3716,29 @@ async function clearRemotePhotoSafely() {
     return (
       <div className="camera-page">
 
-       {cameraSource === "remote" ? (
-  <video
-    ref={videoRef}
-    autoPlay
-    playsInline
-    muted
-    className="camera-video"
-    style={{
-      width: "100%",
-      height: "100%",
-      objectFit: "cover",
-      transform: "scaleX(-1)",
-    }}
-  />
-) : (
-  <video
-    ref={localCameraVideoRef}
-    autoPlay
-    playsInline
-    muted
-    className="camera-video"
-    style={{
-      width: "100%",
-      height: "100%",
-      objectFit: "cover",
-      display: cameraReady ? "block" : "none",
-    }}
-  />
-)}
+        {cameraSource === "remote" ? (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="camera-video"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              transform: "scaleX(-1)",
+            }}
+          />
+        ) : (
+          <video
+            ref={localCameraVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className="camera-video"
+          />
+        )}
 
         <div
           style={{
@@ -3476,23 +3769,25 @@ async function clearRemotePhotoSafely() {
           </div>
 
           <div>
-           {cameraSource === "remote"
-  ? remoteCameraReady
-    ? "📱 IPAD CONNECTED"
-    : "🔴 WAITING FOR IPAD"
-  : cameraReady
-  ? "🎥 LOCAL CAMERA CONNECTED"
-  : "🔴 WAITING FOR LOCAL CAMERA"}
+            {cameraSource === "remote"
+              ? remoteCameraReady
+                ? "📱 IPAD CONNECTED"
+                : "🔴 WAITING FOR IPAD"
+              : cameraReady
+              ? "🎥 LOCAL CAMERA CONNECTED"
+              : "🔴 WAITING FOR LOCAL CAMERA"}
           </div>
         </div>
 
         <div
-  className="camera-overlay"
-  style={{
-    background: "transparent",
-    pointerEvents: "none",
-  }}
->
+          className="camera-overlay"
+          style={{
+            background:
+              "transparent",
+            pointerEvents:
+              "none",
+          }}
+        >
 
           <div className="camera-counter">
 
@@ -3511,8 +3806,8 @@ async function clearRemotePhotoSafely() {
           </div>
 
           {(cameraSource === "remote"
-  ? !remoteCameraReady
-  : !cameraReady) && (
+            ? !remoteCameraReady
+            : !cameraReady) && (
             <div
               className="loading"
               style={{
@@ -3566,13 +3861,16 @@ async function clearRemotePhotoSafely() {
               )
             )}
 
-            </div>
+          </div>
 
-          </div> {/* camera-overlay closes here */}
+        </div>
 
-          {/* CAPTURE BUTTON */}
-          {cameraSource === "remote" &&
-          remoteCameraReady && 
+        {/* =================================================
+            MANUAL REMOTE CAPTURE BUTTON
+        ================================================= */}
+
+        {cameraSource === "remote" &&
+          remoteCameraReady &&
           !waitingForRemotePhoto && (
             <button
               type="button"
@@ -3580,13 +3878,17 @@ async function clearRemotePhotoSafely() {
                 e.preventDefault();
                 e.stopPropagation();
 
-                console.log("🟢 CAPTURE BUTTON CLICKED");
+                console.log(
+                  "🟢 CAPTURE BUTTON CLICKED"
+                );
 
                 try {
-                  setWaitingForRemotePhoto(true);
+                  setWaitingForRemotePhoto(
+                    true
+                  );
 
                   const commandId =
-                   await sendCaptureCommand();
+                    await sendCaptureCommand();
 
                   console.log(
                     "📸 Capture command sent:",
@@ -3598,7 +3900,9 @@ async function clearRemotePhotoSafely() {
                     error
                   );
 
-                  setWaitingForRemotePhoto(false);
+                  setWaitingForRemotePhoto(
+                    false
+                  );
 
                   alert(
                     "Could not send the capture command to the iPad."
@@ -3606,20 +3910,34 @@ async function clearRemotePhotoSafely() {
                 }
               }}
               style={{
-                position: "fixed",
-                bottom: "40px",
-                left: "50%",
-                transform: "translateX(-50%)",
-                width: "90px",
-                height: "90px",
-                zIndex: 999999,
-                borderRadius: "50%",
-                border: "8px solid white",
-                background: "white",
-                cursor: "pointer",
-                pointerEvents: "auto",
-                touchAction: "manipulation",
-                WebkitTapHighlightColor: "transparent",
+                position:
+                  "fixed",
+                bottom:
+                  "40px",
+                left:
+                  "50%",
+                transform:
+                  "translateX(-50%)",
+                width:
+                  "90px",
+                height:
+                  "90px",
+                zIndex:
+                  999999,
+                borderRadius:
+                  "50%",
+                border:
+                  "8px solid white",
+                background:
+                  "white",
+                cursor:
+                  "pointer",
+                pointerEvents:
+                  "auto",
+                touchAction:
+                  "manipulation",
+                WebkitTapHighlightColor:
+                  "transparent",
                 boxShadow:
                   "0 4px 20px rgba(0,0,0,0.5)",
               }}
@@ -3628,9 +3946,9 @@ async function clearRemotePhotoSafely() {
             </button>
           )}
 
-        </div>
-      );
-    }
+      </div>
+    );
+  }
 
   // =====================================================
   // PHOTO SELECTION
@@ -3881,8 +4199,8 @@ async function clearRemotePhotoSafely() {
                   disabled={
                     isUploading
                   }
-                  onClick={
-                    createStrip
+                  onClick={() =>
+                    createStrip()
                   }
                 >
                   {isUploading
@@ -4082,4 +4400,5 @@ async function clearRemotePhotoSafely() {
 
   return null;
 }
+
 export default App;
