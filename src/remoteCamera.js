@@ -3,6 +3,7 @@ import {
   onValue,
   update,
   remove,
+  onDisconnect,
 } from "firebase/database";
 
 import { database } from "./firebase";
@@ -19,7 +20,92 @@ export function getSessionRef() {
 }
 
 // =====================================================
+// CAMERA CONNECTION
+// SET UP DISCONNECT HANDLER
+// =====================================================
+
+export async function setupCameraConnection() {
+  const sessionRef = getSessionRef();
+
+  try {
+    await onDisconnect(sessionRef).update({
+      cameraStatus: "offline",
+      cameraDisconnectedAt: Date.now(),
+    });
+
+    console.log(
+      "📱 Firebase camera disconnect handler registered"
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "❌ Could not register camera disconnect handler:",
+      error
+    );
+
+    return false;
+  }
+}
+
+// =====================================================
+// CAMERA → CONTROLLER
+// CAMERA READY
+// =====================================================
+
+export async function sendCameraReady() {
+  try {
+    await update(getSessionRef(), {
+      cameraStatus: "ready",
+      cameraConnectedAt: Date.now(),
+      cameraLastSeenAt: Date.now(),
+      deviceType: "phone-camera",
+    });
+
+    console.log(
+      "📱 Camera ready status sent to Firebase"
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "❌ Failed to send camera ready:",
+      error
+    );
+
+    return false;
+  }
+}
+
+// =====================================================
+// CAMERA → CONTROLLER
+// HEARTBEAT
+// =====================================================
+
+export async function sendCameraHeartbeat() {
+  try {
+    await update(getSessionRef(), {
+      cameraStatus: "ready",
+      cameraLastSeenAt: Date.now(),
+      deviceType: "phone-camera",
+    });
+
+    console.log("💓 Camera heartbeat sent");
+
+    return true;
+  } catch (error) {
+    console.error(
+      "❌ Camera heartbeat failed:",
+      error
+    );
+
+    return false;
+  }
+}
+
+// =====================================================
 // CONTROLLER → CAMERA
+// SEND CAPTURE COMMAND
 // =====================================================
 
 export async function sendCaptureCommand() {
@@ -45,22 +131,7 @@ export async function sendCaptureCommand() {
 
 // =====================================================
 // CAMERA → CONTROLLER
-// =====================================================
-
-export async function sendCameraReady() {
-  await update(getSessionRef(), {
-    cameraStatus: "ready",
-    cameraConnectedAt: Date.now(),
-    deviceType: "phone-camera",
-  });
-
-  console.log(
-    "📱 Camera ready status sent to Firebase"
-  );
-}
-
-// =====================================================
-// CAMERA → CONTROLLER
+// SEND PHOTO
 // =====================================================
 
 export async function sendPhoto(photo) {
@@ -79,10 +150,11 @@ export async function sendPhoto(photo) {
     photo,
     photoId,
     photoSentAt: Date.now(),
-
     status: "photo-ready",
 
     cameraStatus: "ready",
+    cameraLastSeenAt: Date.now(),
+    deviceType: "phone-camera",
   });
 
   console.log(
@@ -95,12 +167,17 @@ export async function sendPhoto(photo) {
 
 // =====================================================
 // CONTROLLER → IPAD
-// SEND TAKEN PHOTO TO IPAD
+// SEND TAKEN PHOTO
 // =====================================================
 
-export async function sendControllerPhoto(photo, index) {
+export async function sendControllerPhoto(
+  photo,
+  index
+) {
   if (!photo) {
-    throw new Error("No controller photo provided.");
+    throw new Error(
+      "No controller photo provided."
+    );
   }
 
   await update(getSessionRef(), {
@@ -117,12 +194,16 @@ export async function sendControllerPhoto(photo, index) {
 
 // =====================================================
 // CONTROLLER → IPAD
-// SEND FINAL RESULT TO IPAD
+// SEND FINAL RESULT
 // =====================================================
 
-export async function sendFinalResultToCamera(result) {
+export async function sendFinalResultToCamera(
+  result
+) {
   if (!result) {
-    throw new Error("No final result provided.");
+    throw new Error(
+      "No final result provided."
+    );
   }
 
   await update(getSessionRef(), {
@@ -136,19 +217,8 @@ export async function sendFinalResultToCamera(result) {
 }
 
 // =====================================================
-// CLEAR CONTROLLER PHOTO
-// =====================================================
-
-export async function clearControllerPhoto() {
-  await update(getSessionRef(), {
-    controllerPhoto: null,
-    controllerPhotoIndex: null,
-  });
-}
-
-// =====================================================
-// CONTROLLER → CAMERA
-// SHOW LATEST TAKEN PHOTO ON IPAD
+// CONTROLLER → IPAD
+// SHOW PHOTO PREVIEW
 // =====================================================
 
 export async function sendControllerPreview(
@@ -182,8 +252,8 @@ export async function sendControllerPreview(
 }
 
 // =====================================================
-// CONTROLLER → CAMERA
-// SHOW FINAL RESULT ON IPAD
+// CONTROLLER → IPAD
+// SHOW FINAL RESULT
 // =====================================================
 
 export async function sendControllerResult(
@@ -213,6 +283,17 @@ export async function sendControllerResult(
   );
 
   return resultId;
+}
+
+// =====================================================
+// CLEAR CONTROLLER PHOTO
+// =====================================================
+
+export async function clearControllerPhoto() {
+  await update(getSessionRef(), {
+    controllerPhoto: null,
+    controllerPhotoIndex: null,
+  });
 }
 
 // =====================================================
@@ -251,7 +332,7 @@ export async function clearControllerResult() {
 }
 
 // =====================================================
-// CLEAR PHOTO
+// CLEAR REMOTE PHOTO
 // =====================================================
 
 export async function clearRemotePhoto() {
@@ -262,7 +343,7 @@ export async function clearRemotePhoto() {
   });
 
   console.log(
-    "🧹 Remote photo cleared"
+    "🧹 Firebase remote photo cleared"
   );
 }
 
