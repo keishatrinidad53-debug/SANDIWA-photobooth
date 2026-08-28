@@ -3417,18 +3417,35 @@ async function clearRemotePhotoSafely() {
     return (
       <div className="camera-page">
 
-        {cameraSource !==
-          "remote" && (
-          <video
-            ref={
-              localCameraVideoRef
-            }
-            autoPlay
-            playsInline
-            muted
-            className="camera-video"
-          />
-        )}
+       {cameraSource === "remote" ? (
+  <video
+    ref={videoRef}
+    autoPlay
+    playsInline
+    muted
+    className="camera-video"
+    style={{
+      width: "100%",
+      height: "100%",
+      objectFit: "cover",
+      transform: "scaleX(-1)",
+    }}
+  />
+) : (
+  <video
+    ref={localCameraVideoRef}
+    autoPlay
+    playsInline
+    muted
+    className="camera-video"
+    style={{
+      width: "100%",
+      height: "100%",
+      objectFit: "cover",
+      display: cameraReady ? "block" : "none",
+    }}
+  />
+)}
 
         <div
           style={{
